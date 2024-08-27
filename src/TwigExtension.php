@@ -4,6 +4,7 @@ namespace Drupal\neo_twig;
 
 use Drupal\Core\Config\Entity\ThirdPartySettingsInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
+use Drupal\Core\Link;
 use Drupal\Core\Render\Element;
 use Twig\Extension\AbstractExtension;
 use Twig\TwigFilter;
@@ -36,12 +37,19 @@ class TwigExtension extends AbstractExtension {
     if (empty($build)) {
       return $build;
     }
+    if (!is_array($classes)) {
+      $classes = [$classes];
+    }
+    if ($build instanceof Link) {
+      $url = $build->getUrl();
+      $options = $url->getOptions();
+      $options['attributes']['class'] = array_merge($options['attributes']['class'] ?? [], $classes);
+      $url->setOptions($options);
+      return $build;
+    }
     // Make sure the key starts with a hash, so it's treated as a property.
     if (strpos($key, '#') !== 0) {
       $key = '#' . $key;
-    }
-    if (!is_array($classes)) {
-      $classes = [$classes];
     }
     $build[$key] = $build[$key] ?? [];
     $build[$key]['class'] = array_merge($build[$key]['class'] ?? [], $classes);
