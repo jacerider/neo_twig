@@ -3,6 +3,7 @@
 namespace Drupal\neo_twig;
 
 use Drupal\Core\Config\Entity\ThirdPartySettingsInterface;
+use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\Link;
 use Drupal\Core\Render\Element;
@@ -26,7 +27,8 @@ class TwigExtension extends AbstractExtension {
       new TwigFilter('neo_value', [$this, 'getFieldValue']),
       new TwigFilter('neo_raw', [$this, 'getRawValues']),
       new TwigFilter('neo_target_entity', [$this, 'getTargetEntity']),
-
+      new TwigFilter('neo_children', [self::class, 'childrenFilter']),
+      new TwigFilter('neo_field', [self::class, 'renderField']),
     ];
   }
 
@@ -257,6 +259,51 @@ class TwigExtension extends AbstractExtension {
     }
 
     return $parent_key;
+  }
+
+  /**
+   * Filters out the children of a render array, optionally sorted by weight.
+   *
+   * @param array $build
+   *   The render array whose children are to be filtered.
+   * @param bool $sort
+   *   Boolean to indicate whether the children should be sorted by weight.
+   *
+   * @return array
+   *   The element's children.
+   */
+  public static function childrenFilter(array $build, bool $sort = FALSE): array {
+    $keys = Element::children($build, $sort);
+    return array_intersect_key($build, array_flip($keys));
+  }
+
+  /**
+   * Render a field from an entity reference render array.
+   *
+   * @param array $build
+   *   The render array whose children are to be filtered.
+   * @param string $field_id
+   *   The field id to render.
+   *
+   * @return array
+   *   The element's children.
+   */
+  public static function renderField(array $build, string $field_id): array|null {
+    if (!is_array($build) || empty($build['#view_mode'])) {
+      return NULL;
+    }
+    $entity = array_filter($build, function ($entity) {
+      return $entity instanceof ContentEntityInterface;
+    });
+    if (empty($entity)) {
+      return NULL;
+    }
+    /** @var \Drupal\Core\Entity\ContentEntityInterface $entity */
+    $entity = reset($entity);
+    if (!$entity->hasField($field_id)) {
+      return NULL;
+    }
+    return $entity->get($field_id)->view($build['#view_mode']);
   }
 
 }
