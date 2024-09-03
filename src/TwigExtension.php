@@ -288,7 +288,7 @@ class TwigExtension extends AbstractExtension {
    * @return array
    *   The element's children.
    */
-  public static function renderField(array $build, string $field_id): array|null {
+  public static function renderField($build, string $field_id): array|null {
     if (!is_array($build) || empty($build['#view_mode'])) {
       return NULL;
     }
