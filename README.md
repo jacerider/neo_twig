@@ -28,6 +28,29 @@ https://www.drupal.org/node/1897420 for further information.
 TOOLS
 -----
 
+## Class
+
+Add a class to an element.
+
+```twig
+{{ field_image|neo_class('bg-base-500') }}
+```
+
+## Class to Children
+
+Add a class to an children of a renderable.
+
+```twig
+{{ field_images|neo_child_class('bg-base-500') }}
+```
+
+You can also target nested elements within a child by defining the path to the
+nested element.
+
+```twig
+{{ field_images|neo_child_class('bg-base-500', ['images', 'image', '#attributes']) }}
+```
+
 ## Children
 
 Get children of a content field.
@@ -40,7 +63,7 @@ Get children of a content field.
 </ul>
 ```
 
-## Children
+## Field
 
 Render a field from a nested entity reference field.
 

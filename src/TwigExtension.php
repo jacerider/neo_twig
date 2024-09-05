@@ -2,6 +2,7 @@
 
 namespace Drupal\neo_twig;
 
+use Drupal\Component\Utility\NestedArray;
 use Drupal\Core\Config\Entity\ThirdPartySettingsInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
@@ -49,34 +50,37 @@ class TwigExtension extends AbstractExtension {
       $url->setOptions($options);
       return $build;
     }
+    $parents = [];
+    if (is_array($key)) {
+      $parents = $key;
+      $key = array_pop($parents);
+    }
     // Make sure the key starts with a hash, so it's treated as a property.
     if (strpos($key, '#') !== 0) {
       $key = '#' . $key;
     }
-    $build[$key] = $build[$key] ?? [];
-    $build[$key]['class'] = array_merge($build[$key]['class'] ?? [], $classes);
-
-    // Link elements have a different structure.
-    if (!empty($build['#type']) && $build['#type'] === 'link') {
-      $build['#options']['attributes']['class'] = array_merge($build['#options']['attributes']['class'] ?? [], $build[$key]['class']);
+    $element = NestedArray::getValue($build, $parents);
+    if ($element && is_array($element)) {
+      $element[$key] = $element[$key] ?? [];
+      $element[$key]['class'] = array_merge($element[$key]['class'] ?? [], $classes);
+      // Link elements have a different structure.
+      if (!empty($element['#type']) && $element['#type'] === 'link') {
+        $element['#options']['attributes']['class'] = array_merge($element['#options']['attributes']['class'] ?? [], $element[$key]['class']);
+      }
+      NestedArray::setValue($build, $parents, $element);
     }
     return $build;
   }
 
   /**
-   * Add classes to a renderable image array.
+   * Add classes to the children of a renderable.
    */
-  public function addChildClass(array $build, $classes, $key = 'attributes') {
-    // Make sure the key starts with a hash, so it's treated as a property.
-    if (strpos($key, '#') !== 0) {
-      $key = '#' . $key;
-    }
-    if (!is_array($classes)) {
-      $classes = [$classes];
+  public function addChildClass($build, $classes, $key = 'attributes') {
+    if (empty($build)) {
+      return $build;
     }
     foreach (Element::children($build) as $child) {
-      $build[$child][$key] = $build[$child][$key] ?? [];
-      $build[$child][$key]['class'] = array_merge($build[$child][$key]['class'] ?? [], $classes);
+      $build[$child] = $this->addClass($build[$child], $classes, $key);
     }
     return $build;
   }
