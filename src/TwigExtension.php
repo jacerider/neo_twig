@@ -50,6 +50,9 @@ class TwigExtension extends AbstractExtension {
       $url->setOptions($options);
       return $build;
     }
+    if (!is_array($build)) {
+      return $build;
+    }
     $parents = [];
     if (is_array($key)) {
       $parents = $key;
