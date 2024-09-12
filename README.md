@@ -57,7 +57,7 @@ Get children of a content field.
 
 ```twig
 <ul>
-  {% for tag in content.field_tags|children %}
+  {% for tag in content.field_tags|neo_children %}
     <li>{{ tag }}</li>
   {% endfor %}
 </ul>
