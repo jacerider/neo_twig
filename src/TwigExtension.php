@@ -43,6 +43,11 @@ class TwigExtension extends AbstractExtension {
     if (!is_array($classes)) {
       $classes = [$classes];
     }
+    foreach ($classes as &$value) {
+      if (is_array($value)) {
+        $value = implode(' ', $value);
+      }
+    }
     if ($build instanceof Link) {
       $url = $build->getUrl();
       $options = $url->getOptions();
