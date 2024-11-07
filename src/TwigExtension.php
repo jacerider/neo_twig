@@ -24,6 +24,8 @@ class TwigExtension extends AbstractExtension {
     return [
       new TwigFilter('neo_class', [$this, 'addClass']),
       new TwigFilter('neo_child_class', [$this, 'addChildClass']),
+      new TwigFilter('neo_attribute', [$this, 'setAttribute']),
+      new TwigFilter('neo_child_attribute', [$this, 'setChildAttribute']),
       new TwigFilter('neo_label', [$this, 'getFieldLabel']),
       new TwigFilter('neo_value', [$this, 'getFieldValue']),
       new TwigFilter('neo_raw', [$this, 'getRawValues']),
@@ -89,6 +91,58 @@ class TwigExtension extends AbstractExtension {
     }
     foreach (Element::children($build) as $child) {
       $build[$child] = $this->addClass($build[$child], $classes, $key);
+    }
+    return $build;
+  }
+
+  /**
+   * Add attribute to a renderable array.
+   */
+  public function setAttribute($build, string $attribute, string $value, $key = 'attributes') {
+    if (empty($build)) {
+      return $build;
+    }
+    if ($build instanceof Link) {
+      $url = $build->getUrl();
+      $options = $url->getOptions();
+      $options['attributes'][$attribute] = $value;
+      // $options['attributes']['class'] = array_merge($options['attributes']['class'] ?? [], $classes);
+      $url->setOptions($options);
+      return $build;
+    }
+    if (!is_array($build)) {
+      return $build;
+    }
+    $parents = [];
+    if (is_array($key)) {
+      $parents = $key;
+      $key = array_pop($parents);
+    }
+    // Make sure the key starts with a hash, so it's treated as a property.
+    if (strpos($key, '#') !== 0) {
+      $key = '#' . $key;
+    }
+    $element = NestedArray::getValue($build, $parents);
+    if ($element && is_array($element)) {
+      $element[$key] = $element[$key] ?? [];
+      $element[$key][$attribute] = $value;
+      if (!empty($element['#type']) && $element['#type'] === 'link') {
+        $element['#options']['attributes'][$attribute] = $value;
+      }
+      NestedArray::setValue($build, $parents, $element);
+    }
+    return $build;
+  }
+
+  /**
+   * Add classes to the children of a renderable.
+   */
+  public function setChildAttribute($build, string $attribute, string $value, $key = 'attributes') {
+    if (empty($build)) {
+      return $build;
+    }
+    foreach (Element::children($build) as $child) {
+      $build[$child] = $this->setAttribute($build[$child], $attribute, $value, $key);
     }
     return $build;
   }
