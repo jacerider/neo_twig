@@ -11,11 +11,27 @@ use Drupal\Core\Render\Element;
 use Twig\Extension\AbstractExtension;
 use Twig\TwigFilter;
 use Drupal\Core\TypedData\TypedDataInterface;
+use Drupal\Core\Url;
+use Twig\TwigFunction;
+use Twig\Node\Expression\ArrayExpression;
+use Twig\Node\Expression\ConstantExpression;
+use Twig\Node\Node;
 
 /**
  * Defines Twig extensions.
  */
 class TwigExtension extends AbstractExtension {
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getFunctions(): array {
+    return [
+      new TwigFunction('neo_uri', [$this, 'getUrl'], [
+        'is_safe_callback' => [$this, 'isUrlGenerationSafe'],
+      ]),
+    ];
+  }
 
   /**
    * {@inheritdoc}
@@ -33,6 +49,21 @@ class TwigExtension extends AbstractExtension {
       new TwigFilter('neo_children', [self::class, 'childrenFilter']),
       new TwigFilter('neo_field', [self::class, 'renderField']),
     ];
+  }
+
+  /**
+   * Get the URL for a given URI.
+   *
+   * @param string $uri
+   *   The URI.
+   * @param array $options
+   *   The options.
+   *
+   * @return string
+   *   The URL.
+   */
+  public function getUrl(string $uri, array $options = []) {
+    return Url::fromUri($uri, $options)->toString();
   }
 
   /**
@@ -370,6 +401,45 @@ class TwigExtension extends AbstractExtension {
       return NULL;
     }
     return $entity->get($field_id)->view($build['#view_mode']);
+  }
+
+  /**
+   * Determines at compile time whether the generated URL will be safe.
+   *
+   * Saves the unneeded automatic escaping for performance reasons.
+   *
+   * The URL generation process percent encodes non-alphanumeric characters.
+   * Thus, the only character within a URL that must be escaped in HTML is the
+   * ampersand ("&") which separates query params. Thus we cannot mark
+   * the generated URL as always safe, but only when we are sure there won't be
+   * multiple query params. This is the case when there are none or only one
+   * constant parameter given. For instance, we know beforehand this will not
+   * need to be escaped:
+   * - path('route')
+   * - path('route', {'param': 'value'})
+   * But the following may need to be escaped:
+   * - path('route', var)
+   * - path('route', {'param': ['val1', 'val2'] }) // a sub-array
+   * - path('route', {'param1': 'value1', 'param2': 'value2'})
+   * If param1 and param2 reference placeholders in the route, it would not
+   * need to be escaped, but we don't know that in advance.
+   *
+   * @param \Twig\Node\Node $args_node
+   *   The arguments of the path/url functions.
+   *
+   * @return array
+   *   An array with the contexts the URL is safe
+   */
+  public function isUrlGenerationSafe(Node $args_node) {
+    // Support named arguments.
+    $parameter_node = $args_node->hasNode('parameters') ? $args_node->getNode('parameters') : ($args_node->hasNode(1) ? $args_node->getNode(1) : NULL);
+
+    if (!isset($parameter_node) || $parameter_node instanceof ArrayExpression && count($parameter_node) <= 2 &&
+        (!$parameter_node->hasNode(1) || $parameter_node->getNode(1) instanceof ConstantExpression)) {
+      return ['html'];
+    }
+
+    return [];
   }
 
 }
