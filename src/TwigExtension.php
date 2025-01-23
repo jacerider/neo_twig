@@ -8,6 +8,7 @@ use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\Link;
 use Drupal\Core\Render\Element;
+use Drupal\Core\Template\Attribute;
 use Twig\Extension\AbstractExtension;
 use Twig\TwigFilter;
 use Drupal\Core\TypedData\TypedDataInterface;
@@ -40,6 +41,7 @@ class TwigExtension extends AbstractExtension {
     return [
       new TwigFilter('neo_class', [$this, 'addClass']),
       new TwigFilter('neo_child_class', [$this, 'addChildClass']),
+      new TwigFilter('neo_property_class', [$this, 'addPropertyClass']),
       new TwigFilter('neo_attribute', [$this, 'setAttribute']),
       new TwigFilter('neo_child_attribute', [$this, 'setChildAttribute']),
       new TwigFilter('neo_label', [$this, 'getFieldLabel']),
@@ -91,22 +93,35 @@ class TwigExtension extends AbstractExtension {
     if (!is_array($build)) {
       return $build;
     }
+
     $parents = [];
     if (is_array($key)) {
       $parents = $key;
       $key = array_pop($parents);
     }
-    // Make sure the key starts with a hash, so it's treated as a property.
-    if (strpos($key, '#') !== 0) {
-      $key = '#' . $key;
-    }
     $element = NestedArray::getValue($build, $parents);
     if ($element && is_array($element)) {
+      if (!isset($element[$key])) {
+        // Make sure the key starts with a hash, so it's treated as a property.
+        if (strpos($key, '#') !== 0) {
+          $key = '#' . $key;
+        }
+      }
       $element[$key] = $element[$key] ?? [];
-      $element[$key]['class'] = array_merge($element[$key]['class'] ?? [], $classes);
-      // Link elements have a different structure.
-      if (!empty($element['#type']) && $element['#type'] === 'link') {
-        $element['#options']['attributes']['class'] = array_merge($element['#options']['attributes']['class'] ?? [], $element[$key]['class']);
+      if ($element[$key] instanceof Attribute) {
+        $element[$key] = $element[$key]->addClass($classes);
+      }
+      elseif ($element[$key] instanceof Url) {
+        $options = $element[$key]->getOptions();
+        $options['attributes']['class'] = array_merge($options['attributes']['class'] ?? [], $classes);
+        $element[$key]->setOptions($options);
+      }
+      else {
+        $element[$key]['class'] = array_merge($element[$key]['class'] ?? [], $classes);
+        // Link elements have a different structure.
+        if (!empty($element['#type']) && $element['#type'] === 'link') {
+          $element['#options']['attributes']['class'] = array_merge($element['#options']['attributes']['class'] ?? [], $element[$key]['class']);
+        }
       }
       NestedArray::setValue($build, $parents, $element);
     }
@@ -127,6 +142,25 @@ class TwigExtension extends AbstractExtension {
   }
 
   /**
+   * Add classes to the children of a renderable.
+   */
+  public function addPropertyClass($build, $classes, $property = 'items', $key = 'attributes') {
+    if (empty($build)) {
+      return $build;
+    }
+    // Make sure the key starts with a hash, so it's treated as a property.
+    if (strpos($property, '#') !== 0) {
+      $property = '#' . $property;
+    }
+    if (isset($build[$property]) && is_array($build[$property])) {
+      foreach ($build[$property] as $delta => $item) {
+        $build[$property][$delta] = $this->addClass($item, $classes, $key);
+      }
+    }
+    return $build;
+  }
+
+  /**
    * Add attribute to a renderable array.
    */
   public function setAttribute($build, string $attribute, string $value, $key = 'attributes') {
@@ -137,7 +171,6 @@ class TwigExtension extends AbstractExtension {
       $url = $build->getUrl();
       $options = $url->getOptions();
       $options['attributes'][$attribute] = $value;
-      // $options['attributes']['class'] = array_merge($options['attributes']['class'] ?? [], $classes);
       $url->setOptions($options);
       return $build;
     }
