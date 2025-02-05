@@ -42,6 +42,7 @@ class TwigExtension extends AbstractExtension {
       new TwigFilter('neo_class', [$this, 'addClass']),
       new TwigFilter('neo_child_class', [$this, 'addChildClass']),
       new TwigFilter('neo_property_class', [$this, 'addPropertyClass']),
+      new TwigFilter('neo_attributes', [$this, 'mergeAttributes']),
       new TwigFilter('neo_attribute', [$this, 'setAttribute']),
       new TwigFilter('neo_child_attribute', [$this, 'setChildAttribute']),
       new TwigFilter('neo_label', [$this, 'getFieldLabel']),
@@ -157,6 +158,49 @@ class TwigExtension extends AbstractExtension {
         $build[$property][$delta] = $this->addClass($item, $classes, $key);
       }
     }
+    return $build;
+  }
+
+  /**
+   * Add attributes to a renderable array.
+   */
+  public function mergeAttributes($build, Attribute|array $attributes, $key = 'attributes') {
+    if (empty($build)) {
+      return $build;
+    }
+    if (is_array($attributes)) {
+      $attributes = new Attribute($attributes);
+    }
+    if ($build instanceof Link) {
+      $url = $build->getUrl();
+      $options = $url->getOptions();
+      $linkAttributes = new Attribute($options['attributes'] ?? []);
+      $linkAttributes->merge($attributes);
+      $option['attributes'] = $linkAttributes->toArray();
+      $url->setOptions($options);
+      return $build;
+    }
+    if (!is_array($build)) {
+      return $build;
+    }
+    $parents = [];
+    if (is_array($key)) {
+      $parents = $key;
+      $key = array_pop($parents);
+    }
+    // Make sure the key starts with a hash, so it's treated as a property.
+    if (strpos($key, '#') !== 0) {
+      $key = '#' . $key;
+    }
+    $element = NestedArray::getValue($build, $parents);
+    if ($element && is_array($element)) {
+      $element[$key] = $element[$key] ?? [];
+      $elementAttributes = new Attribute($element[$key]);
+      $elementAttributes->merge($attributes);
+      $element[$key] = $elementAttributes;
+      NestedArray::setValue($build, $parents, $element);
+    }
+
     return $build;
   }
 
