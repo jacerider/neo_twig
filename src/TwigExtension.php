@@ -66,7 +66,12 @@ class TwigExtension extends AbstractExtension {
    *   The URL.
    */
   public function getUrl(string $uri, array $options = []) {
-    return Url::fromUri($uri, $options)->toString();
+    try {
+      return Url::fromUri($uri, $options)->toString();
+    }
+    catch (\Exception $e) {
+      return Url::fromUserInput($uri);
+    }
   }
 
   /**
