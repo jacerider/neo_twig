@@ -57,7 +57,7 @@ class TwigExtension extends AbstractExtension {
   /**
    * Get the URL for a given URI.
    *
-   * @param string $uri
+   * @param string|null $uri
    *   The URI.
    * @param array $options
    *   The options.
@@ -65,12 +65,15 @@ class TwigExtension extends AbstractExtension {
    * @return string
    *   The URL.
    */
-  public function getUrl(string $uri, array $options = []) {
+  public function getUrl(string|null $uri, array $options = []) {
+    if (empty($uri)) {
+      return Url::fromRoute('<current>')->toString();
+    }
     try {
       return Url::fromUri($uri, $options)->toString();
     }
     catch (\Exception $e) {
-      return Url::fromUserInput($uri);
+      return Url::fromUserInput($uri)->toString();
     }
   }
 
