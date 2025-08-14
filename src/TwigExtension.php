@@ -65,7 +65,7 @@ class TwigExtension extends AbstractExtension {
    * @return string
    *   The URL.
    */
-  public function getUrl($uri, array $options = []) {
+  public function getUrl($uri, ?array $options = []) {
     if (empty($uri)) {
       return Url::fromRoute('<current>')->toString();
     }
