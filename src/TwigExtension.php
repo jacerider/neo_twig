@@ -61,19 +61,24 @@ class TwigExtension extends AbstractExtension {
    *   The URI.
    * @param array $options
    *   The options.
+   * @param bool $destination
+   *   Whether to add the current page as a destination query parameter.
    *
    * @return string
    *   The URL.
    */
-  public function getUrl($uri, ?array $options = []) {
+  public function getUrl($uri, ?array $options = [], $destination = FALSE) {
+    if ($destination) {
+      $options['query']['destination'] = Url::fromRoute('<current>')->toString();
+    }
     if (empty($uri)) {
-      return Url::fromRoute('<current>')->toString();
+      return Url::fromRoute('<current>', $options)->toString();
     }
     try {
       return Url::fromUri($uri, $options ?? [])->toString();
     }
     catch (\Exception $e) {
-      return Url::fromUserInput($uri)->toString();
+      return Url::fromUserInput($uri, $options)->toString();
     }
   }
 
