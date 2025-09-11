@@ -144,13 +144,34 @@ class TwigExtension extends AbstractExtension {
 
   /**
    * Add classes to the children of a renderable.
+   *
+   * Example:
+   * {{ build|add_child_class('my-class') }}
+   * {{ build|add_child_class('my-class', 'wrapper_attributes') }}
+   *
+   * This will add the class to any child element that has a property with the
+   * provided key and value. For example ['#field_name' => 'title'].
+   * {{ build|add_child_class('my-class', 'wrapper_attributes',
+   * 'field_name', 'title') }}
    */
-  public function addChildClass($build, $classes, $key = 'attributes') {
+  public function addChildClass($build, $classes, $key = 'attributes', $prop = NULL, $propValue = NULL) {
     if (empty($build)) {
       return $build;
     }
+    if ($prop) {
+      if (strpos($prop, '#') !== 0) {
+        $prop = '#' . $prop;
+      }
+    }
     foreach (Element::children($build) as $child) {
-      $build[$child] = $this->addClass($build[$child], $classes, $key);
+      if ($prop && $propValue) {
+        if (isset($build[$child][$prop]) && $build[$child][$prop] === $propValue) {
+          $build[$child] = $this->addClass($build[$child], $classes, $key);
+        }
+      }
+      else {
+        $build[$child] = $this->addClass($build[$child], $classes, $key);
+      }
     }
     return $build;
   }
