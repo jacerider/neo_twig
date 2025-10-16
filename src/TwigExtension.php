@@ -72,7 +72,7 @@ class TwigExtension extends AbstractExtension {
       $options['query']['destination'] = Url::fromRoute('<current>')->toString();
     }
     if (empty($uri)) {
-      return Url::fromRoute('<current>', $options)->toString();
+      return Url::fromRoute('<current>', [], $options)->toString();
     }
     try {
       return Url::fromUri($uri, $options ?? [])->toString();
