@@ -78,7 +78,13 @@ class TwigExtension extends AbstractExtension {
       return Url::fromUri($uri, $options ?? [])->toString();
     }
     catch (\Exception $e) {
-      return Url::fromUserInput($uri, $options)->toString();
+      try {
+        return Url::fromUserInput($uri, $options)->toString();
+      }
+      catch (\Exception $e) {
+        // If the URI is invalid.
+        return '/';
+      }
     }
   }
 
