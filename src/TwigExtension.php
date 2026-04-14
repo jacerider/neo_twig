@@ -9,6 +9,8 @@ use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\Link;
 use Drupal\Core\Render\Element;
 use Drupal\Core\Template\Attribute;
+use Drupal\media\OEmbed\Resource;
+use Drupal\media\OEmbed\ResourceException;
 use Twig\Extension\AbstractExtension;
 use Twig\TwigFilter;
 use Drupal\Core\TypedData\TypedDataInterface;
@@ -31,6 +33,7 @@ class TwigExtension extends AbstractExtension {
       new TwigFunction('neo_uri', [$this, 'getUrl'], [
         'is_safe_callback' => [$this, 'isUrlGenerationSafe'],
       ]),
+      new TwigFunction('neo_oembed', [$this, 'getOembed']),
     ];
   }
 
@@ -52,6 +55,105 @@ class TwigExtension extends AbstractExtension {
       new TwigFilter('neo_children', [self::class, 'childrenFilter']),
       new TwigFilter('neo_field', [self::class, 'renderField']),
     ];
+  }
+
+  /**
+   * Get an oEmbed renderable array from a URL.
+   *
+   * @param string $url
+   *   The oEmbed URL.
+   * @param int $max_width
+   *   The maximum width.
+   * @param int $max_height
+   *   The maximum height.
+   *
+   * @return array
+   *   A renderable array.
+   */
+  public function getOembed(string $url, int $max_width = 0, int $max_height = 0): array {
+    if (empty($url)) {
+      return [];
+    }
+
+    try {
+      /** @var \Drupal\media\OEmbed\UrlResolverInterface $url_resolver */
+      $url_resolver = \Drupal::service('media.oembed.url_resolver');
+      /** @var \Drupal\media\OEmbed\ResourceFetcherInterface $resource_fetcher */
+      $resource_fetcher = \Drupal::service('media.oembed.resource_fetcher');
+      /** @var \Drupal\media\IFrameUrlHelper $iframe_url_helper */
+      $iframe_url_helper = \Drupal::service('media.oembed.iframe_url_helper');
+
+      $resource_url = $url_resolver->getResourceUrl($url, $max_width, $max_height);
+      $resource = $resource_fetcher->fetchResource($resource_url);
+    }
+    catch (ResourceException $exception) {
+      \Drupal::logger('neo_twig')->error("Could not retrieve the remote URL (@url): %error", [
+        '@url' => $url,
+        '%error' => $exception->getPrevious() ? $exception->getPrevious()->getMessage() : $exception->getMessage(),
+      ]);
+      return [];
+    }
+
+    if ($resource->getType() === Resource::TYPE_LINK) {
+      return [
+        '#title' => $resource->getTitle(),
+        '#type' => 'link',
+        '#url' => Url::fromUri($url),
+      ];
+    }
+
+    if ($resource->getType() === Resource::TYPE_PHOTO) {
+      return [
+        '#theme' => 'image',
+        '#uri' => $resource->getUrl()->toString(),
+        '#width' => $resource->getWidth(),
+        '#height' => $resource->getHeight(),
+        '#attributes' => [
+          'loading' => 'lazy',
+        ],
+      ];
+    }
+
+    $iframe_url = Url::fromRoute('media.oembed_iframe', [], [
+      'absolute' => TRUE,
+      'query' => [
+        'url' => $url,
+        'max_width' => $max_width,
+        'max_height' => $max_height,
+        'hash' => $iframe_url_helper->getHash($url, $max_width, $max_height),
+      ],
+    ]);
+
+    $config = \Drupal::config('media.settings');
+    $domain = $config->get('iframe_domain');
+    if ($domain) {
+      $iframe_url->setOption('base_url', $domain);
+    }
+
+    $element = [
+      '#type' => 'html_tag',
+      '#tag' => 'iframe',
+      '#attributes' => [
+        'src' => $iframe_url->toString(),
+        'scrolling' => FALSE,
+        'width' => $resource->getWidth() ?: $max_width,
+        'height' => $resource->getHeight() ?: $max_height,
+        'class' => ['media-oembed-content'],
+        'loading' => 'lazy',
+      ],
+      '#attached' => [
+        'library' => [
+          'media/oembed.formatter',
+        ],
+      ],
+    ];
+
+    $title = $resource->getTitle();
+    if ($title) {
+      $element['#attributes']['title'] = $title;
+    }
+
+    return $element;
   }
 
   /**
