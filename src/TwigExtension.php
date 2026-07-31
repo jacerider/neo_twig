@@ -170,6 +170,9 @@ class TwigExtension extends AbstractExtension {
    *   The URL.
    */
   public function getUrl($uri, ?array $options = [], $destination = FALSE) {
+    // Templates commonly pass a value that does not exist, such as
+    // `link.options` on a link that has none, which arrives here as NULL.
+    $options = $options ?? [];
     if ($destination) {
       $options['query']['destination'] = Url::fromRoute('<current>')->toString();
     }
@@ -177,7 +180,7 @@ class TwigExtension extends AbstractExtension {
       return Url::fromRoute('<current>', [], $options)->toString();
     }
     try {
-      return Url::fromUri($uri, $options ?? [])->toString();
+      return Url::fromUri($uri, $options)->toString();
     }
     catch (\Exception $e) {
       try {
