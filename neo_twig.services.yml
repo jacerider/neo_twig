@@ -1,5 +1,6 @@
 services:
   neo_twig.twig_extension:
     class: Drupal\neo_twig\TwigExtension
+    arguments: ['%twig.config%']
     tags:
       - { name: twig.extension, priority: 100 }

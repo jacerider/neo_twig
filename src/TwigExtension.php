@@ -2,7 +2,10 @@
 
 namespace Drupal\neo_twig;
 
+use Drupal\Component\Render\MarkupInterface;
+use Drupal\Component\Utility\Html;
 use Drupal\Component\Utility\NestedArray;
+use Drupal\Component\Utility\Unicode;
 use Drupal\Core\Config\Entity\ThirdPartySettingsInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
@@ -26,6 +29,23 @@ use Twig\Node\Node;
 class TwigExtension extends AbstractExtension {
 
   /**
+   * Whether Twig debugging is on.
+   *
+   * @var bool
+   */
+  protected bool $debug;
+
+  /**
+   * Constructs a TwigExtension object.
+   *
+   * @param array $twig_config
+   *   The Twig configuration from the container.
+   */
+  public function __construct(array $twig_config = []) {
+    $this->debug = !empty($twig_config['debug']);
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function getFunctions(): array {
@@ -34,7 +54,226 @@ class TwigExtension extends AbstractExtension {
         'is_safe_callback' => [$this, 'isUrlGenerationSafe'],
       ]),
       new TwigFunction('neo_oembed', [$this, 'getOembed']),
+      new TwigFunction('neo_inspect', [$this, 'inspect'], [
+        'is_safe' => ['html'],
+        // So `neo_inspect()` with no argument can list what is in scope.
+        'needs_context' => TRUE,
+      ]),
     ];
+  }
+
+  /**
+   * Renders the addressable structure of a render array, for debugging.
+   *
+   * Answers "what can I print in here?" without a devel/kint dependency. Gated
+   * on twig.config.debug, the same switch that turns on core's FILE NAME
+   * SUGGESTIONS comments, so it is inert on any environment where a developer
+   * has not deliberately opted into Twig debugging — including if one of these
+   * calls is committed by accident.
+   *
+   * Called with no argument it lists every variable in scope, which is the
+   * quickest answer to "what can I print in this template?". Called with one
+   * it walks that value's printable children instead.
+   *
+   * @param array $context
+   *   The Twig context, supplied by Twig itself.
+   * @param mixed $var
+   *   The variable to inspect, normally a render array. Omit to list the whole
+   *   context.
+   * @param int $depth
+   *   How many levels of children to walk.
+   *
+   * @return string
+   *   An HTML table, or an empty string when debugging is off.
+   */
+  public function inspect(array $context, $var = NULL, int $depth = 2): string {
+    if (!$this->debug) {
+      return '';
+    }
+    // NULL also covers `neo_inspect(nope)` for a variable that does not exist,
+    // where listing what does exist is the answer the author actually needs.
+    if ($var === NULL) {
+      return $this->inspectContext($context);
+    }
+    if (!is_array($var)) {
+      return '<pre style="' . self::INSPECT_BOX . '">neo_inspect: '
+        . Html::escape(is_object($var) ? get_class($var) : gettype($var))
+        . '</pre>';
+    }
+
+    $head = array_filter([
+      isset($var['#type']) ? '#type: ' . self::inspectScalar($var['#type']) : NULL,
+      isset($var['#theme']) ? '#theme: ' . self::inspectScalar($var['#theme']) : NULL,
+      isset($var['#theme_wrappers']) ? '#theme_wrappers: ' . self::inspectScalar($var['#theme_wrappers']) : NULL,
+    ]);
+
+    $rows = $this->inspectRows($var, max(1, $depth));
+    $out = '<table style="' . self::INSPECT_BOX . 'border-collapse:collapse;width:100%;">';
+    $out .= '<caption style="text-align:left;padding:4px 6px;font-weight:bold;">neo_inspect'
+      . ($head ? ' — ' . Html::escape(implode('  ', $head)) : '')
+      . '</caption>';
+    if (!$rows) {
+      $out .= '<tr><td style="padding:4px 6px;">no printable children'
+        . ' — this value renders as a whole</td></tr>';
+    }
+    foreach ($rows as $row) {
+      $out .= '<tr>'
+        . '<td style="padding:2px 6px;border-top:1px solid #0002;white-space:nowrap;">'
+        . str_repeat('&nbsp;&nbsp;', $row['level'])
+        . '<code>' . Html::escape($row['key']) . '</code></td>'
+        . '<td style="padding:2px 6px;border-top:1px solid #0002;opacity:.75;">' . Html::escape($row['type']) . '</td>'
+        . '<td style="padding:2px 6px;border-top:1px solid #0002;opacity:.75;">' . Html::escape($row['title']) . '</td>'
+        . '</tr>';
+    }
+    return $out . '</table>';
+  }
+
+  /**
+   * Lists every variable in scope in the current template.
+   *
+   * @param array $context
+   *   The Twig context.
+   *
+   * @return string
+   *   An HTML table.
+   */
+  private function inspectContext(array $context): string {
+    $out = '<table style="' . self::INSPECT_BOX . 'border-collapse:collapse;width:100%;">';
+    $out .= '<caption style="text-align:left;padding:4px 6px;font-weight:bold;">'
+      . 'neo_inspect — variables in scope</caption>';
+    $rows = 0;
+    foreach ($context as $name => $value) {
+      // Twig's own internals (_self, _context, _charset) and our plumbing are
+      // not things a template author can usefully print.
+      if (!is_string($name) || str_starts_with($name, '_')) {
+        continue;
+      }
+      $rows++;
+      $out .= '<tr>'
+        . '<td style="padding:2px 6px;border-top:1px solid #0002;white-space:nowrap;">'
+        . '<code>{{ ' . Html::escape($name) . ' }}</code></td>'
+        . '<td style="padding:2px 6px;border-top:1px solid #0002;opacity:.75;">'
+        . Html::escape(self::describe($value)) . '</td>'
+        . '</tr>';
+    }
+    if (!$rows) {
+      $out .= '<tr><td style="padding:4px 6px;">no variables in scope</td></tr>';
+    }
+    $out .= '<tr><td colspan="2" style="padding:4px 6px;border-top:1px solid #0002;opacity:.75;">'
+      . 'Pass one in to walk its children, e.g. <code>{{ neo_inspect(' . Html::escape((string) array_key_first(array_filter(
+        $context,
+        fn($k) => is_string($k) && !str_starts_with($k, '_'),
+        ARRAY_FILTER_USE_KEY
+      )) ?: 'form') . ') }}</code></td></tr>';
+    return $out . '</table>';
+  }
+
+  /**
+   * Describes a context value in one short phrase.
+   *
+   * @param mixed $value
+   *   The value.
+   *
+   * @return string
+   *   A description such as "render array (#type: form)" or "string".
+   */
+  private static function describe($value): string {
+    if (is_array($value)) {
+      $properties = array_filter(array_keys($value), fn($k) => is_string($k) && str_starts_with($k, '#'));
+      if ($properties) {
+        foreach (['#type', '#theme', '#markup', '#plain_text'] as $property) {
+          if (isset($value[$property])) {
+            return 'render array (' . $property . ': ' . self::inspectScalar($value[$property]) . ')';
+          }
+        }
+        return 'render array';
+      }
+      return 'array (' . count($value) . ' items)';
+    }
+    if (is_object($value)) {
+      $class = get_class($value);
+      $short = substr($class, (int) strrpos($class, '\\') + 1);
+      if ($value instanceof MarkupInterface) {
+        return $short . ': ' . Unicode::truncate(trim(strip_tags((string) $value)), 40, TRUE, TRUE);
+      }
+      return $short;
+    }
+    if (is_bool($value)) {
+      return 'bool: ' . ($value ? 'TRUE' : 'FALSE');
+    }
+    if ($value === NULL) {
+      return 'NULL';
+    }
+    return gettype($value) . ': ' . Unicode::truncate((string) $value, 40, TRUE, TRUE);
+  }
+
+  /**
+   * Inline style shared by every neo_inspect box.
+   */
+  private const INSPECT_BOX = 'font:12px/1.5 ui-monospace,monospace;background:#ffd;color:#000;border:1px solid #cc0;margin:4px 0;';
+
+  /**
+   * Flattens a render-array property to a short string.
+   *
+   * @param mixed $value
+   *   The property value.
+   *
+   * @return string
+   *   A one-line representation.
+   */
+  private static function inspectScalar($value): string {
+    if (is_array($value)) {
+      return implode(', ', array_map(fn($v) => is_scalar($v) ? (string) $v : '…', $value));
+    }
+    return is_scalar($value) ? (string) $value : '…';
+  }
+
+  /**
+   * Collects the printable children of a render array.
+   *
+   * @param array $element
+   *   The render array.
+   * @param int $depth
+   *   How many levels to walk.
+   * @param int $level
+   *   The current level.
+   *
+   * @return array
+   *   Rows with `level`, `key`, `type` and `title`.
+   */
+  private function inspectRows(array $element, int $depth, int $level = 0): array {
+    $rows = [];
+    foreach ($element as $key => $child) {
+      if (!is_string($key) || str_starts_with($key, '#')) {
+        continue;
+      }
+      $type = '';
+      $title = '';
+      if (is_array($child)) {
+        foreach (['#type', '#theme', '#markup', '#plain_text'] as $property) {
+          if (isset($child[$property])) {
+            $type = ltrim($property, '#') === 'type' || ltrim($property, '#') === 'theme'
+              ? self::inspectScalar($child[$property])
+              : ltrim($property, '#');
+            break;
+          }
+        }
+        $title = isset($child['#title']) ? (string) $child['#title'] : '';
+      }
+      else {
+        $type = gettype($child);
+      }
+      $rows[] = [
+        'level' => $level,
+        'key' => $key,
+        'type' => $type,
+        'title' => $title,
+      ];
+      if (is_array($child) && $level + 1 < $depth) {
+        $rows = array_merge($rows, $this->inspectRows($child, $depth, $level + 1));
+      }
+    }
+    return $rows;
   }
 
   /**
