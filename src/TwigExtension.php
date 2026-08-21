@@ -418,6 +418,16 @@ class TwigExtension extends AbstractExtension {
     if (empty($uri)) {
       return Url::fromRoute('<current>', [], $options)->toString();
     }
+    if ($this->isNonLinkingUri($uri)) {
+      // <nolink>, <none> and <button> are deliberately path-less: core renders
+      // them as a <span>, not a link. Neither branch below can say that — the
+      // routed form resolves to '' and the bare form falls through to the '/'
+      // fallback, sending the visitor to the front page. Return the empty
+      // string so an un-updated template degrades to a dead href rather than
+      // navigating somewhere the author never named. Suppressing the anchor
+      // itself is the template's job: guard on the uri before calling this.
+      return '';
+    }
     try {
       return Url::fromUri($uri, $options)->toString();
     }
@@ -430,6 +440,34 @@ class TwigExtension extends AbstractExtension {
         return '/';
       }
     }
+  }
+
+  /**
+   * Checks whether a uri names one of Drupal's three non-linking routes.
+   *
+   * Matches both the routed form Url::toUriString() produces
+   * (`route:<nolink>`) and the bare form a component author writes into an
+   * examples block (`<nolink>`).
+   *
+   * Kept local rather than shared with neo_alchemist's NonLinkingUri: neo_twig
+   * declares no module dependencies, and three route names are not worth
+   * acquiring one.
+   *
+   * @param mixed $uri
+   *   The uri to test. Templates pass whatever they hold, so a non-string
+   *   (a Url object, a MarkupInterface) simply answers FALSE and falls
+   *   through to the resolution below.
+   *
+   * @return bool
+   *   TRUE for <nolink>, <none> and <button>.
+   */
+  protected function isNonLinkingUri(mixed $uri): bool {
+    if (!is_string($uri)) {
+      return FALSE;
+    }
+    $route = str_starts_with($uri, 'route:') ? substr($uri, strlen('route:')) : $uri;
+    [$route] = explode(';', $route, 2);
+    return in_array($route, ['<nolink>', '<none>', '<button>'], TRUE);
   }
 
   /**
