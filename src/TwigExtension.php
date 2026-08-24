@@ -6,11 +6,13 @@ use Drupal\Component\Render\MarkupInterface;
 use Drupal\Component\Utility\Html;
 use Drupal\Component\Utility\NestedArray;
 use Drupal\Component\Utility\Unicode;
+use Drupal\Component\Utility\Xss;
 use Drupal\Core\Config\Entity\ThirdPartySettingsInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\Link;
 use Drupal\Core\Render\Element;
+use Drupal\Core\Render\Markup;
 use Drupal\Core\Template\Attribute;
 use Drupal\media\OEmbed\Resource;
 use Drupal\media\OEmbed\ResourceException;
@@ -78,8 +80,9 @@ class TwigExtension extends AbstractExtension {
    *   deployed site pays one boolean per guard and nothing else, which is what
    *   makes it acceptable to call this from every early return on the module's
    *   hottest surface.
-   * - **It changes nothing.** It answers the value it was handed, so a guard
-   *   reads `return $this->notice('neo_class', '…', $build);`, and it never
+   * - **It changes nothing a deployed site renders.** It answers the value the
+   *   helper is about to hand back, so a guard reads
+   *   `return $this->notice('neo_class', '…', $value, $build);`, and it never
    *   raises and never throws — including when the container cannot answer for
    *   a logger, because a diagnostic that takes a template down is worse than
    *   the silence it replaces.
@@ -93,6 +96,25 @@ class TwigExtension extends AbstractExtension {
    * link)", "Url", "string: …" — reused exactly as it stands, because that is
    * the vocabulary this module has already taught a template author.
    *
+   * **Two surfaces, and the shape of the answer picks one.** The log takes
+   * every notice and is the only surface a helper answering `NULL`, a string
+   * or a `Link` can reach. A helper that is about to hand back a render array
+   * hands it over as well, and the same line is attached to that element so it
+   * renders where the element renders — inside core's own Twig-debug output
+   * markers, which name the template that made the call without any helper
+   * needing to know what template it is in. That is the mysterious case: a
+   * real value went in, a real value came out, and nothing changed.
+   *
+   * Two rules govern the inline surface and neither bends:
+   *
+   * - **An empty value never carries one.** Attaching to one would make it
+   *   truthy, and a dev template guarding on `{% if thing %}` would render a
+   *   branch production does not. An empty value gets the log line and nothing
+   *   else, which is also why the guard that fires most cannot flood a page.
+   * - **It is never deduplicated.** An inline notice belongs to the element
+   *   that failed, so suppressing the second copy of a message would leave the
+   *   notice beside the wrong element. Only the log deduplicates.
+   *
    * @param string $name
    *   The helper's registered name, as a template author types it —
    *   `neo_class`, never `addClass`. The method behind the name is not
@@ -102,45 +124,91 @@ class TwigExtension extends AbstractExtension {
    *   array or a Link".
    * @param mixed $received
    *   The value that actually arrived.
+   * @param mixed $build
+   *   The value the helper is about to hand back, when it has one to hand
+   *   over. Omit it and the notice is log-only, which is all a helper
+   *   answering `NULL`, a string or a `Link` can carry.
    *
    * @return mixed
-   *   The value that arrived, unchanged.
+   *   What the helper should hand back: the value handed over when there was
+   *   one, and otherwise the value that arrived, unchanged.
    *
    * @see \Drupal\neo_twig\TwigExtension::describe()
    */
-  protected function notice(string $name, string $expected, $received) {
+  protected function notice(string $name, string $expected, $received, $build = NULL) {
     // Everything below this line costs something, so nothing below it runs on
     // an environment where a developer has not opted into Twig debugging.
     if (!$this->debug) {
-      return $received;
+      return $build ?? $received;
     }
 
     $description = self::describe($received);
     $message = $name . ': expected ' . $expected . ', received ' . $description;
-    if (isset($this->noticed[$message])) {
-      return $received;
-    }
-    $this->noticed[$message] = TRUE;
 
-    try {
-      // Resolved lazily, the way getOembed() resolves its services: a
-      // constructor argument would be a container rebuild on every site that
-      // installs this module, and the injection question belongs to its own
-      // backlog candidate.
-      $this->logger ??= \Drupal::logger('neo_twig');
-      $this->logger->debug('@helper: expected @expected, received @received', [
-        '@helper' => $name,
-        '@expected' => $expected,
-        '@received' => $description,
-      ]);
-    }
-    catch (\Throwable) {
-      // No container, no logger service, or a logger that could not write.
-      // The template renders exactly what it rendered before, which is the
-      // whole promise of the gate this notice sits behind.
+    // The inline surface comes first and is never deduplicated, because the
+    // notice belongs to this element rather than to this request. An empty
+    // value is skipped outright: attaching to one would make it truthy.
+    if (is_array($build) && $build) {
+      $this->attach($build, $message);
     }
 
-    return $received;
+    if (!isset($this->noticed[$message])) {
+      $this->noticed[$message] = TRUE;
+      try {
+        // Resolved lazily, the way getOembed() resolves its services: a
+        // constructor argument would be a container rebuild on every site that
+        // installs this module, and the injection question belongs to its own
+        // backlog candidate.
+        $this->logger ??= \Drupal::logger('neo_twig');
+        $this->logger->debug('@helper: expected @expected, received @received', [
+          '@helper' => $name,
+          '@expected' => $expected,
+          '@received' => $description,
+        ]);
+      }
+      catch (\Throwable) {
+        // No container, no logger service, or a logger that could not write.
+        // The template renders exactly what it rendered before, which is the
+        // whole promise of the gate this notice sits behind.
+      }
+    }
+
+    return $build ?? $received;
+  }
+
+  /**
+   * Attaches a notice after an element's own output.
+   *
+   * `#suffix` rather than a child, because a child is only rendered by an
+   * element that renders its children and a notice has to arrive on every
+   * shape a helper is handed. Whatever the element already had there is kept
+   * and the notice lands after it, so the element's own trailing output still
+   * comes out first.
+   *
+   * The message is escaped: the description in it carries a field's value, a
+   * token's output or a stray string from a template, none of which this
+   * module wrote. The result is marked safe so the box survives the renderer's
+   * admin filter, which strips the `style` attribute otherwise — and anything
+   * that was already there is put through exactly the filter the renderer
+   * would have applied to it, so marking the pair safe does not smuggle
+   * anything past a check it would otherwise have faced.
+   *
+   * @param array $build
+   *   The element the helper is about to hand back.
+   * @param string $message
+   *   The notice, as plain text.
+   *
+   * @see \Drupal\Core\Render\Renderer::xssFilterAdminIfUnsafe()
+   */
+  private function attach(array &$build, string $message): void {
+    $existing = $build['#suffix'] ?? '';
+    if (!$existing instanceof MarkupInterface) {
+      $existing = Xss::filterAdmin((string) $existing);
+    }
+    $build['#suffix'] = Markup::create($existing
+      . '<div style="' . self::INSPECT_BOX . 'padding:4px 6px;">'
+      . Html::escape($message)
+      . '</div>');
   }
 
   /**
