@@ -14,6 +14,7 @@ use Drupal\Core\Render\Element;
 use Drupal\Core\Template\Attribute;
 use Drupal\media\OEmbed\Resource;
 use Drupal\media\OEmbed\ResourceException;
+use Psr\Log\LoggerInterface;
 use Twig\Extension\AbstractExtension;
 use Twig\TwigFilter;
 use Drupal\Core\TypedData\TypedDataInterface;
@@ -36,6 +37,20 @@ class TwigExtension extends AbstractExtension {
   protected bool $debug;
 
   /**
+   * The module's logger channel, resolved lazily, or NULL until it is.
+   *
+   * @var \Psr\Log\LoggerInterface|null
+   */
+  protected ?LoggerInterface $logger = NULL;
+
+  /**
+   * Notices already written this request, keyed by the message itself.
+   *
+   * @var array<string, true>
+   */
+  protected array $noticed = [];
+
+  /**
    * Constructs a TwigExtension object.
    *
    * @param array $twig_config
@@ -43,6 +58,89 @@ class TwigExtension extends AbstractExtension {
    */
   public function __construct(array $twig_config = []) {
     $this->debug = !empty($twig_config['debug']);
+  }
+
+  /**
+   * Says that a helper returned early without doing its job.
+   *
+   * Every silent guard in this class calls this, and supplies only two things:
+   * its own **registered name** and one short phrase saying what it expected.
+   * What arrived is described here, the line is worded here and the logging
+   * happens here, so changing how a notice reads is one edit rather than one
+   * per guard.
+   *
+   * Three properties are the reason it exists:
+   *
+   * - **The gate is read first.** Before the value is described, before a
+   *   message is built and before the container is asked for anything, this
+   *   checks `twig.config.debug` — the same switch `inspect()` is gated on and
+   *   the same one that turns on core's FILE NAME SUGGESTIONS comments. A
+   *   deployed site pays one boolean per guard and nothing else, which is what
+   *   makes it acceptable to call this from every early return on the module's
+   *   hottest surface.
+   * - **It changes nothing.** It answers the value it was handed, so a guard
+   *   reads `return $this->notice('neo_class', '…', $build);`, and it never
+   *   raises and never throws — including when the container cannot answer for
+   *   a logger, because a diagnostic that takes a template down is worse than
+   *   the silence it replaces.
+   * - **The log is deduplicated per request.** The guard that fires most is
+   *   the benign empty-value one, and fifty identical lines on one page make a
+   *   log useless. The same message is written once however many call sites
+   *   produce it; a different helper, a different expectation or a different
+   *   value arriving is a different message and gets its own line.
+   *
+   * The value is described in `inspect()`'s own words — "render array (#type:
+   * link)", "Url", "string: …" — reused exactly as it stands, because that is
+   * the vocabulary this module has already taught a template author.
+   *
+   * @param string $name
+   *   The helper's registered name, as a template author types it —
+   *   `neo_class`, never `addClass`. The method behind the name is not
+   *   something a template author has ever seen.
+   * @param string $expected
+   *   One short phrase saying what the helper expected, such as "a render
+   *   array or a Link".
+   * @param mixed $received
+   *   The value that actually arrived.
+   *
+   * @return mixed
+   *   The value that arrived, unchanged.
+   *
+   * @see \Drupal\neo_twig\TwigExtension::describe()
+   */
+  protected function notice(string $name, string $expected, $received) {
+    // Everything below this line costs something, so nothing below it runs on
+    // an environment where a developer has not opted into Twig debugging.
+    if (!$this->debug) {
+      return $received;
+    }
+
+    $description = self::describe($received);
+    $message = $name . ': expected ' . $expected . ', received ' . $description;
+    if (isset($this->noticed[$message])) {
+      return $received;
+    }
+    $this->noticed[$message] = TRUE;
+
+    try {
+      // Resolved lazily, the way getOembed() resolves its services: a
+      // constructor argument would be a container rebuild on every site that
+      // installs this module, and the injection question belongs to its own
+      // backlog candidate.
+      $this->logger ??= \Drupal::logger('neo_twig');
+      $this->logger->debug('@helper: expected @expected, received @received', [
+        '@helper' => $name,
+        '@expected' => $expected,
+        '@received' => $description,
+      ]);
+    }
+    catch (\Throwable) {
+      // No container, no logger service, or a logger that could not write.
+      // The template renders exactly what it rendered before, which is the
+      // whole promise of the gate this notice sits behind.
+    }
+
+    return $received;
   }
 
   /**
