@@ -637,6 +637,25 @@ class TwigExtension extends AbstractExtension {
   }
 
   /**
+   * What the three attribute writers expect to be handed.
+   *
+   * Their first two guards catch the same thing from two directions — a value
+   * that is empty, and a value that is neither a render array nor a `Link` —
+   * so they say the same thing about what they wanted. What separates the two
+   * notices is the description of what actually turned up.
+   */
+  private const WRITER_EXPECTS = 'a render array or a Link';
+
+  /**
+   * What the three attribute writers expect the key to reach.
+   *
+   * One phrase for one rule, said once: the resolver they share is the only
+   * place a write target is looked for, so it is the only place that has to
+   * say what it was looking for.
+   */
+  private const WRITER_EXPECTS_TARGET = 'a key that resolves to an element it can write into';
+
+  /**
    * Resolve the write target for an attribute writer.
    *
    * Splits a parents path out of the key argument, applies the hash-prefix
@@ -649,17 +668,35 @@ class TwigExtension extends AbstractExtension {
    * name. A bare key that is already there is a key something already reads,
    * so the write goes where it is read.
    *
+   * **A path that misses is where a writer is most mysterious**, so this is
+   * also where it says so. A real render array went in, a real render array
+   * comes back out and nothing about it changed — which is invisible from
+   * inside a template. One resolver means one notice describing one rule for
+   * all three writers, rather than three copies of it drifting apart; the
+   * writer supplies only its **registered name**, because that is the only
+   * part of the answer the resolver cannot know.
+   *
+   * The value the notice reports is what the path actually resolved to —
+   * NULL, a scalar, or an empty array — because that is the difference
+   * between the three mistakes an author is trying to tell apart. The array
+   * is taken by reference so the writer hands back the one the notice was
+   * attached to; with the **debug gate** off nothing is attached and the
+   * reference is never written through.
+   *
    * @param array $build
-   *   The renderable array being written to.
+   *   The renderable array being written to. Gains the **inline notice** when
+   *   the target cannot be reached and Twig debugging is on.
    * @param string|array $key
    *   The key to write to, or an array whose last entry is the key and whose
    *   earlier entries are a parents path to the element holding it.
+   * @param string $name
+   *   The calling writer's registered name, as a template author types it.
    *
    * @return array|null
    *   A tuple of the parents path, the resolved key and the element found at
    *   that path, or NULL when there is nothing to write to.
    */
-  protected function resolveWriteTarget($build, $key) {
+  protected function resolveWriteTarget(&$build, $key, string $name) {
     $parents = [];
     if (is_array($key)) {
       $parents = $key;
@@ -675,6 +712,7 @@ class TwigExtension extends AbstractExtension {
       }
       return [$parents, $key, $element];
     }
+    $build = $this->notice($name, self::WRITER_EXPECTS_TARGET, $element, $build);
     return NULL;
   }
 
@@ -723,7 +761,7 @@ class TwigExtension extends AbstractExtension {
    */
   public function addClass($build, $classes, $key = 'attributes') {
     if (empty($build)) {
-      return $build;
+      return $this->notice('neo_class', self::WRITER_EXPECTS, $build);
     }
     if (!is_array($classes)) {
       $classes = [$classes];
@@ -741,10 +779,10 @@ class TwigExtension extends AbstractExtension {
       return $build;
     }
     if (!is_array($build)) {
-      return $build;
+      return $this->notice('neo_class', self::WRITER_EXPECTS, $build);
     }
 
-    $target = $this->resolveWriteTarget($build, $key);
+    $target = $this->resolveWriteTarget($build, $key, 'neo_class');
     if ($target === NULL) {
       return $build;
     }
@@ -824,7 +862,7 @@ class TwigExtension extends AbstractExtension {
    */
   public function mergeAttributes($build, Attribute|array $attributes, $key = 'attributes') {
     if (empty($build)) {
-      return $build;
+      return $this->notice('neo_attributes', self::WRITER_EXPECTS, $build);
     }
     if (is_array($attributes)) {
       $attributes = new Attribute($attributes);
@@ -839,9 +877,9 @@ class TwigExtension extends AbstractExtension {
       return $build;
     }
     if (!is_array($build)) {
-      return $build;
+      return $this->notice('neo_attributes', self::WRITER_EXPECTS, $build);
     }
-    $target = $this->resolveWriteTarget($build, $key);
+    $target = $this->resolveWriteTarget($build, $key, 'neo_attributes');
     if ($target === NULL) {
       return $build;
     }
@@ -881,7 +919,7 @@ class TwigExtension extends AbstractExtension {
    */
   public function setAttribute($build, string $attribute, string $value, $key = 'attributes') {
     if (empty($build)) {
-      return $build;
+      return $this->notice('neo_attribute', self::WRITER_EXPECTS, $build);
     }
     if ($build instanceof Link) {
       $url = $build->getUrl();
@@ -891,9 +929,9 @@ class TwigExtension extends AbstractExtension {
       return $build;
     }
     if (!is_array($build)) {
-      return $build;
+      return $this->notice('neo_attribute', self::WRITER_EXPECTS, $build);
     }
-    $target = $this->resolveWriteTarget($build, $key);
+    $target = $this->resolveWriteTarget($build, $key, 'neo_attribute');
     if ($target === NULL) {
       return $build;
     }
