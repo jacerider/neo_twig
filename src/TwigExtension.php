@@ -656,6 +656,25 @@ class TwigExtension extends AbstractExtension {
   private const WRITER_EXPECTS_TARGET = 'a key that resolves to an element it can write into';
 
   /**
+   * What the three writing children walkers expect to be handed.
+   *
+   * Their empty guard is the one place all three say the same thing: there was
+   * nothing to walk at all, before any question of children or of a property
+   * arises. `neo_children` is not among them — finding no children is its
+   * answer rather than a job left undone.
+   */
+  private const WALKER_EXPECTS = 'a render array to walk';
+
+  /**
+   * What the two child walkers expect the array they were handed to hold.
+   *
+   * `neo_property_class` says something else, because it does not walk
+   * children: it names the property it looked under, which is the only part of
+   * its answer a shared phrase could not carry.
+   */
+  private const WALKER_EXPECTS_CHILDREN = 'a render array with children';
+
+  /**
    * Resolve the write target for an attribute writer.
    *
    * Splits a parents path out of the key argument, applies the hash-prefix
@@ -818,14 +837,23 @@ class TwigExtension extends AbstractExtension {
    */
   public function addChildClass($build, $classes, $key = 'attributes', $prop = NULL, $propValue = NULL) {
     if (empty($build)) {
-      return $build;
+      return $this->notice('neo_child_class', self::WALKER_EXPECTS, $build);
     }
     if ($prop) {
       if (strpos($prop, '#') !== 0) {
         $prop = '#' . $prop;
       }
     }
-    foreach (Element::children($build) as $child) {
+    // Resolved before the loop rather than in its header, so that a walk over
+    // an array holding no children can say so. What reaches this is whatever
+    // survived the empty guard, exactly as before: a value that is not an
+    // array still raises out of Element::children() rather than being caught
+    // here, because this ticket adds a notice and removes no behaviour.
+    $children = Element::children($build);
+    if (!$children) {
+      return $this->notice('neo_child_class', self::WALKER_EXPECTS_CHILDREN, $build, $build);
+    }
+    foreach ($children as $child) {
       if ($prop && $propValue) {
         if (isset($build[$child][$prop]) && $build[$child][$prop] === $propValue) {
           $build[$child] = $this->addClass($build[$child], $classes, $key);
@@ -843,7 +871,7 @@ class TwigExtension extends AbstractExtension {
    */
   public function addPropertyClass($build, $classes, $property = 'items', $key = 'attributes') {
     if (empty($build)) {
-      return $build;
+      return $this->notice('neo_property_class', self::WALKER_EXPECTS, $build);
     }
     // Make sure the key starts with a hash, so it's treated as a property.
     if (strpos($property, '#') !== 0) {
@@ -853,8 +881,20 @@ class TwigExtension extends AbstractExtension {
       foreach ($build[$property] as $delta => $item) {
         $build[$property][$delta] = $this->addClass($item, $classes, $key);
       }
+      return $build;
     }
-    return $build;
+    // The hash-prefixed name is what the notice reports, because it is what
+    // was actually looked for: this walker has no bare-key fallback, so an
+    // author who typed `items` at an array holding `items` is looking straight
+    // at the key they named while nothing was ever read from it. What arrived
+    // is whatever sat at that key — nothing, or something that is not an array
+    // — which is the difference between the two mistakes.
+    return $this->notice(
+      'neo_property_class',
+      'an array under ' . $property,
+      is_array($build) ? ($build[$property] ?? NULL) : NULL,
+      $build
+    );
   }
 
   /**
@@ -960,9 +1000,13 @@ class TwigExtension extends AbstractExtension {
    */
   public function setChildAttribute($build, string $attribute, string $value, $key = 'attributes') {
     if (empty($build)) {
-      return $build;
+      return $this->notice('neo_child_attribute', self::WALKER_EXPECTS, $build);
     }
-    foreach (Element::children($build) as $child) {
+    $children = Element::children($build);
+    if (!$children) {
+      return $this->notice('neo_child_attribute', self::WALKER_EXPECTS_CHILDREN, $build, $build);
+    }
+    foreach ($children as $child) {
       $build[$child] = $this->setAttribute($build[$child], $attribute, $value, $key);
     }
     return $build;
