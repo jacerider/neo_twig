@@ -21,16 +21,14 @@ use PHPUnit\Framework\Attributes\Group;
  * Nothing here needs a container: `Attribute`, `Link`, `Url` and `NestedArray`
  * all construct without one.
  *
- * Three of the behaviours below are pinned as they stand. Each records a
+ * Both writers reach through a `Link` to the `Url` it wraps and write into
+ * that URL's options — `neo_attributes` merging a whole attribute set,
+ * `neo_attribute` setting one name.
+ *
+ * Two of the behaviours below are pinned as they stand. Each records a
  * **defect**, not an intention, so that the candidate which repairs it has to
  * edit an assertion that was expecting it:
  *
- * - `neo_attributes` handed a `Link` **returns it unchanged**. It builds the
- *   merged attribute set, assigns it to `$option` — a variable nothing ever
- *   reads — and writes the untouched `$options` back to the URL. That is the
- *   fourth defect of the family this module's git history already carries
- *   three fixes for, and it is latent in this site because the single
- *   `neo_attributes` call here passes a render array.
  * - Both writers apply the strict **hash-prefix rule**: they *always* prefix.
  *   On a value carrying a bare `attributes` key they therefore write to
  *   `#attributes`, where `neo_class` writes to `attributes`. Same argument,
@@ -113,22 +111,72 @@ final class TwigExtensionAttributesTest extends UnitTestCase {
   }
 
   /**
-   * It leaves a Link unchanged when merging attributes into it.
+   * It merges an Attribute object into a Link's url options.
    *
-   * **A pinned defect, not an intention.** The `Link` branch reads the wrapped
-   * URL's options, merges the incoming attributes into a fresh `Attribute`,
-   * then assigns the result to `$option` — a variable nothing reads — and
-   * hands `$options`, still untouched, back to `setOptions()`. The filter
-   * therefore returns the link exactly as it received it and reports nothing.
-   *
-   * Its two sibling writers both reach through to the URL correctly, so this
-   * assertion is the odd one out on purpose. When the one-line fix lands, this
-   * test goes red and the diff names the behaviour change for the thirty sites
-   * that get it.
+   * A `Link` is not a render array and has no property to write to, so the
+   * filter reaches through to the `Url` it wraps: it reads that URL's options,
+   * merges the incoming set into whatever `attributes` option is already
+   * there, and writes the options back. The `Link` itself comes back, mutated
+   * in place, so a template can keep piping it — which is what `neo_attribute`
+   * does on the same value, one name at a time.
    */
-  public function testLeavesLinkUnchangedWhenMergingAttributes(): void {
+  public function testMergesAttributeObjectIntoLinkUrlOptions(): void {
+    $url = Url::fromRoute('entity.node.canonical', ['node' => 1]);
+    $link = Link::fromTextAndUrl('Read more', $url);
+
+    $result = $this->extension->mergeAttributes($link, new Attribute([
+      'class' => ['second'],
+      'data-role' => 'panel',
+    ]));
+
+    $this->assertSame($link, $result, 'The same Link object is returned, mutated in place.');
+    $this->assertSame(
+      ['class' => ['second'], 'data-role' => 'panel'],
+      $result->getUrl()->getOptions()['attributes'] ?? NULL,
+      'The merged set is written into the wrapped URL\'s attributes option.'
+    );
+  }
+
+  /**
+   * It merges an array of attributes into a Link's url options.
+   *
+   * The same wrapping the render-array path does happens before the `Link`
+   * branch is reached, so an array argument and an `Attribute` argument are
+   * the same call by the time the URL is touched.
+   */
+  public function testMergesArrayOfAttributesIntoLinkUrlOptions(): void {
+    $url = Url::fromRoute('entity.node.canonical', ['node' => 1]);
+    $link = Link::fromTextAndUrl('Read more', $url);
+
+    $result = $this->extension->mergeAttributes($link, [
+      'class' => ['second'],
+      'data-role' => 'panel',
+    ]);
+
+    $this->assertSame($link, $result, 'The same Link object is returned, mutated in place.');
+    $this->assertSame(
+      ['class' => ['second'], 'data-role' => 'panel'],
+      $result->getUrl()->getOptions()['attributes'] ?? NULL,
+      'An array of attributes is wrapped and merged the same way.'
+    );
+  }
+
+  /**
+   * It merges into a Link that already carries attributes, keeping both sets.
+   *
+   * `Attribute::merge()` deep-merges, so a class list on the link and a class
+   * list from the caller are concatenated rather than replaced and duplicates
+   * are not removed. An attribute the incoming set does not mention is left
+   * alone. That is deliberately not `neo_class`'s flat `array_merge` on the
+   * class key alone — a whole-set deep merge is what distinguishes this
+   * writer from that one.
+   */
+  public function testMergesIntoLinkAlreadyCarryingAttributesKeepingBothSets(): void {
     $url = Url::fromRoute('entity.node.canonical', ['node' => 1], [
-      'attributes' => ['class' => ['first']],
+      'attributes' => [
+        'class' => ['first'],
+        'id' => 'kept',
+      ],
     ]);
     $link = Link::fromTextAndUrl('Read more', $url);
 
@@ -137,12 +185,46 @@ final class TwigExtensionAttributesTest extends UnitTestCase {
       'data-role' => 'panel',
     ]);
 
-    $this->assertSame($link, $result, 'The same Link object is returned.');
     $this->assertSame(
-      ['attributes' => ['class' => ['first']]],
-      $result->getUrl()->getOptions(),
-      'The wrapped URL\'s options are byte-for-byte what they were.'
+      [
+        'class' => ['first', 'second'],
+        'id' => 'kept',
+        'data-role' => 'panel',
+      ],
+      $result->getUrl()->getOptions()['attributes'] ?? NULL,
+      'Both sets survive: the class lists concatenate and nothing is dropped.'
     );
+  }
+
+  /**
+   * It merges attributes into a Link without disturbing other url options.
+   *
+   * Only the `attributes` key of the options array is rewritten. Everything
+   * else the URL was built with — a query, a fragment, an absolute flag —
+   * comes back through `setOptions()` exactly as it went in.
+   */
+  public function testMergesIntoLinkWithoutDisturbingOtherUrlOptions(): void {
+    $url = Url::fromRoute('entity.node.canonical', ['node' => 1], [
+      'attributes' => ['class' => ['first']],
+      'query' => ['page' => '2'],
+      'fragment' => 'main',
+      'absolute' => TRUE,
+    ]);
+    $link = Link::fromTextAndUrl('Read more', $url);
+
+    $options = $this->extension
+      ->mergeAttributes($link, ['data-role' => 'panel'])
+      ->getUrl()
+      ->getOptions();
+
+    $this->assertSame(
+      ['class' => ['first'], 'data-role' => 'panel'],
+      $options['attributes'] ?? NULL,
+      'The merge lands on the attributes option.'
+    );
+    $this->assertSame(['page' => '2'], $options['query'], 'The query is untouched.');
+    $this->assertSame('main', $options['fragment'], 'The fragment is untouched.');
+    $this->assertTrue($options['absolute'], 'The absolute flag is untouched.');
   }
 
   /**
@@ -190,8 +272,8 @@ final class TwigExtensionAttributesTest extends UnitTestCase {
    * A `Link` is not a render array and has no property to write to, so the
    * filter reaches through to the URL it wraps and writes the attribute into
    * that URL's `attributes` option. The `Link` itself comes back, mutated in
-   * place, so a template can keep piping it — which is precisely what the
-   * `neo_attributes` branch above fails to do.
+   * place, so a template can keep piping it — the same reach-through the
+   * `neo_attributes` branch above makes with a whole set.
    */
   public function testSetsNamedAttributeOnLinkUrlOptions(): void {
     $url = Url::fromRoute('entity.node.canonical', ['node' => 1], [

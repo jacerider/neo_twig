@@ -598,7 +598,7 @@ class TwigExtension extends AbstractExtension {
       $options = $url->getOptions();
       $linkAttributes = new Attribute($options['attributes'] ?? []);
       $linkAttributes->merge($attributes);
-      $option['attributes'] = $linkAttributes->toArray();
+      $options['attributes'] = $linkAttributes->toArray();
       $url->setOptions($options);
       return $build;
     }
