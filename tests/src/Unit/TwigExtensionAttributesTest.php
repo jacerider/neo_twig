@@ -30,13 +30,10 @@ use PHPUnit\Framework\Attributes\Group;
  * only when the element carries no bare key of that name. Same argument, same
  * value, one destination — the same one `neo_class` resolves.
  *
- * One behaviour below is still pinned as it stands. It records a **defect**,
- * not an intention, so that the candidate which repairs it has to edit an
- * assertion that was expecting it:
- *
- * - `neo_attribute` mirrors its write into `#options` on a `#type: link`
- *   element. `neo_attributes` does not, so a merge onto a link element misses
- *   the mirror the other two writers make.
+ * Both writers make the **link-element mirror**, as `neo_class` does: a write
+ * onto a `#type: link` element is copied into the `#options` the rendered
+ * anchor reads from. `neo_attributes` used to omit it, so a merge onto a link
+ * element landed only where nothing read it; it no longer does.
  *
  * @see \Drupal\Tests\neo_twig\Unit\TwigExtensionAddClassTest
  */
@@ -393,20 +390,14 @@ final class TwigExtensionAttributesTest extends UnitTestCase {
   }
 
   /**
-   * It mirrors a set attribute into #options, and does not mirror a merge.
+   * It mirrors a set attribute into #options on a #type link element.
    *
-   * **Pinned as current behaviour.** A `#type: link` element renders its
-   * attributes out of `#options`, not out of `#attributes`, so `neo_attribute`
-   * copies its write across — as `neo_class` does. `neo_attributes` has no
-   * such branch at all, so a merge onto a link element writes a property the
-   * rendered link never reads, and the element's `#options` come out of the
-   * filter untouched.
-   *
-   * Two of the three writers mirror and one does not; a later candidate folds
-   * that into whichever it makes authoritative, and this is the assertion it
-   * has to flip.
+   * A `#type: link` element renders its attributes out of `#options`, not out
+   * of `#attributes`, so `neo_attribute` copies its write across — as
+   * `neo_class` does, and as `neo_attributes` now does too. This half of the
+   * mirror did not move; the merge half is pinned in its own test below.
    */
-  public function testMirrorsSetAttributeIntoOptionsButNotMergedOnes(): void {
+  public function testMirrorsSetAttributeIntoOptionsOnLinkElement(): void {
     $build = [
       '#type' => 'link',
       '#title' => 'Read more',
@@ -427,18 +418,113 @@ final class TwigExtensionAttributesTest extends UnitTestCase {
       $set['#options']['attributes'],
       'It is mirrored into the options the link renders from.'
     );
+  }
+
+  /**
+   * It mirrors merged attributes into #options on a #type link element.
+   *
+   * The third writer joins the other two. A merge onto a link element used to
+   * land on `#attributes` alone — a property the rendered anchor never reads —
+   * so `{{ el|neo_attributes(attrs) }}` on a `#type: link` appeared to run and
+   * changed nothing. The merged set is now handed to the seam that owns the
+   * mirror, which copies it into the options the link renders from.
+   *
+   * What the options already carried survives: a mirrored list is appended to
+   * whatever was there rather than replacing it, and an attribute the merge
+   * does not mention is left alone. That is the same shape `neo_class`'s
+   * mirror has always had.
+   */
+  public function testMirrorsMergedAttributesIntoOptionsOnLinkElement(): void {
+    $build = [
+      '#type' => 'link',
+      '#title' => 'Read more',
+      '#url' => Url::fromRoute('entity.node.canonical', ['node' => 1]),
+      '#attributes' => ['class' => ['first']],
+      '#options' => [
+        'attributes' => [
+          'data-existing' => 'kept',
+          'class' => ['already'],
+        ],
+        'query' => ['page' => '2'],
+      ],
+    ];
+
+    $merged = $this->extension->mergeAttributes($build, [
+      'class' => ['second'],
+      'data-role' => 'panel',
+    ]);
+
+    $this->assertSame(
+      ['class' => ['first', 'second'], 'data-role' => 'panel'],
+      $merged['#attributes']->toArray(),
+      'The merge reaches the element property just as it always did.'
+    );
+    $this->assertSame(
+      [
+        'data-existing' => 'kept',
+        'class' => ['already', 'first', 'second'],
+        'data-role' => 'panel',
+      ],
+      $merged['#options']['attributes'],
+      'And it is mirrored into the options the rendered anchor reads from.'
+    );
+    $this->assertSame(
+      ['page' => '2'],
+      $merged['#options']['query'],
+      'No other option is disturbed by the mirror.'
+    );
+
+    $bare = $this->extension->mergeAttributes([
+      '#type' => 'link',
+      '#title' => 'Read more',
+      '#url' => Url::fromRoute('entity.node.canonical', ['node' => 1]),
+    ], ['data-role' => 'panel']);
+
+    $this->assertSame(
+      ['data-role' => 'panel'],
+      $bare['#options']['attributes'],
+      'The options path is created when the element carried none.'
+    );
+  }
+
+  /**
+   * It writes nothing into #options on an element that is not a #type link.
+   *
+   * The mirror exists because a link renders from its options; nothing else
+   * does. An `#options` property on any other element means something else
+   * entirely — a select element's option list, say — so none of the three
+   * writers may touch it. Pinned for all three, because the mirror they now
+   * share is one branch and a mistake in it would reach every one of them.
+   */
+  public function testWritesNothingIntoOptionsOnNonLinkElement(): void {
+    $build = [
+      '#type' => 'select',
+      '#options' => ['one' => 'One', 'two' => 'Two'],
+      '#attributes' => ['class' => ['first']],
+    ];
 
     $merged = $this->extension->mergeAttributes($build, ['data-role' => 'panel']);
 
     $this->assertSame(
-      'panel',
-      (string) $merged['#attributes']['data-role'],
-      'The merge reaches the element property just the same.'
+      ['one' => 'One', 'two' => 'Two'],
+      $merged['#options'],
+      'neo_attributes leaves a non-link element\'s options alone.'
     );
+
+    $set = $this->extension->setAttribute($build, 'data-role', 'panel');
+
     $this->assertSame(
-      ['data-existing' => 'kept'],
-      $merged['#options']['attributes'],
-      'But nothing is mirrored, so the rendered link never sees it.'
+      ['one' => 'One', 'two' => 'Two'],
+      $set['#options'],
+      'neo_attribute leaves them alone too.'
+    );
+
+    $classed = $this->extension->addClass($build, 'added');
+
+    $this->assertSame(
+      ['one' => 'One', 'two' => 'Two'],
+      $classed['#options'],
+      'And so does neo_class.'
     );
   }
 

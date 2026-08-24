@@ -681,6 +681,7 @@ class TwigExtension extends AbstractExtension {
     }
     [$parents, $key, $element] = $target;
     $element[$key] = $element[$key] ?? [];
+    $mirror = NULL;
     if ($element[$key] instanceof Attribute) {
       // An Attribute object is merged into rather than replaced, so anything
       // still holding a handle to it sees the merge.
@@ -700,10 +701,13 @@ class TwigExtension extends AbstractExtension {
       $elementAttributes = new Attribute($element[$key]);
       $elementAttributes->merge($attributes);
       $element[$key] = $elementAttributes;
+      // The merged set is array-shaped, so it is handed over to be mirrored.
+      // The two branches above are not: an Attribute object and a Url are
+      // written into in place, and neither is a payload the mirror can read.
+      $mirror = $elementAttributes->toArray();
     }
 
-    // This writer hands over no payload, so it makes no link-element mirror.
-    return $this->commitWriteTarget($build, $parents, $element);
+    return $this->commitWriteTarget($build, $parents, $element, $mirror);
   }
 
   /**
