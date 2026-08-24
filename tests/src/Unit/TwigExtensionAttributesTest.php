@@ -446,4 +446,233 @@ final class TwigExtensionAttributesTest extends UnitTestCase {
     );
   }
 
+  /**
+   * It merges attributes into a Url at the resolved key, not over the top.
+   *
+   * The resolved key does not have to hold an array. A `#type: link` element
+   * carries a `Url` at `#url`, and pointing this writer at that key used to
+   * build a fresh attribute set out of an object with nothing to iterate from
+   * outside — an empty one — and write it over the top, destroying the link's
+   * destination silently. The `Url` now stays a `Url`, mutated in place, with
+   * the incoming set merged into its own `attributes` option: the same
+   * reach-through the `Link` branch performs one level up, and the same shape
+   * `neo_class` already handles here.
+   */
+  public function testMergesAttributesIntoUrlAtResolvedKeyRatherThanReplacingIt(): void {
+    $url = Url::fromRoute('entity.node.canonical', ['node' => 1], [
+      'attributes' => [
+        'class' => ['first'],
+        'id' => 'kept',
+      ],
+      'query' => ['page' => '2'],
+    ]);
+    $build = [
+      '#type' => 'link',
+      '#title' => 'Read more',
+      '#url' => $url,
+    ];
+
+    $result = $this->extension->mergeAttributes($build, [
+      'class' => ['second'],
+      'data-role' => 'panel',
+    ], 'url');
+
+    $this->assertInstanceOf(
+      Url::class,
+      $result['#url'],
+      'The Url stays a Url; it is not replaced by an attribute set.'
+    );
+    $this->assertSame($url, $result['#url'], 'It is the same Url, mutated in place.');
+    $this->assertSame(
+      [
+        'class' => ['first', 'second'],
+        'id' => 'kept',
+        'data-role' => 'panel',
+      ],
+      $result['#url']->getOptions()['attributes'],
+      'The incoming set is merged into the Url\'s own attributes option.'
+    );
+    $this->assertSame(
+      ['page' => '2'],
+      $result['#url']->getOptions()['query'],
+      'No other url option is disturbed.'
+    );
+  }
+
+  /**
+   * It sets a named attribute into a Url at the resolved key, not over the top.
+   *
+   * The narrow writer meets the same shape and takes the same route: a `Url`
+   * at the resolved key is not an array, so the name and value go into the
+   * url's own `attributes` option and the `Url` survives. Pointing this writer
+   * at a `#type: link` element's `#url` used to try to use that object as an
+   * array; whatever it did, it was never a link that still went anywhere.
+   */
+  public function testSetsNamedAttributeIntoUrlAtResolvedKeyRatherThanReplacingIt(): void {
+    $url = Url::fromRoute('entity.node.canonical', ['node' => 1], [
+      'attributes' => ['class' => ['first']],
+      'query' => ['page' => '2'],
+    ]);
+    $build = [
+      '#type' => 'link',
+      '#title' => 'Read more',
+      '#url' => $url,
+    ];
+
+    $result = $this->extension->setAttribute($build, 'data-role', 'panel', 'url');
+
+    $this->assertInstanceOf(
+      Url::class,
+      $result['#url'],
+      'The Url stays a Url; it is not replaced by an attribute list.'
+    );
+    $this->assertSame($url, $result['#url'], 'It is the same Url, mutated in place.');
+    $this->assertSame(
+      ['class' => ['first'], 'data-role' => 'panel'],
+      $result['#url']->getOptions()['attributes'],
+      'The named attribute is written into the Url\'s own attributes option.'
+    );
+    $this->assertSame(
+      ['page' => '2'],
+      $result['#url']->getOptions()['query'],
+      'No other url option is disturbed.'
+    );
+  }
+
+  /**
+   * It merges attributes into an Attribute object at the resolved key.
+   *
+   * An `Attribute` — what a preprocessed template variable usually carries —
+   * is written into rather than replaced, as `neo_class` already writes into
+   * one. That matters beyond the return value: the object at the key is the
+   * same object a preprocess function still holds a handle to, so building a
+   * fresh one out of it would leave that handle pointing at the unmerged set.
+   */
+  public function testMergesAttributesIntoAttributeObjectAtResolvedKey(): void {
+    $attribute = new Attribute(['class' => ['first'], 'id' => 'kept']);
+    $build = ['#markup' => 'x', '#attributes' => $attribute];
+
+    $result = $this->extension->mergeAttributes($build, [
+      'class' => ['second'],
+      'data-role' => 'panel',
+    ]);
+
+    $this->assertSame(
+      $attribute,
+      $result['#attributes'],
+      'The Attribute object is written into, not replaced by a fresh one.'
+    );
+    $this->assertSame(
+      [
+        'class' => ['first', 'second'],
+        'id' => 'kept',
+        'data-role' => 'panel',
+      ],
+      $attribute->toArray(),
+      'The incoming set is merged over what the object already carried.'
+    );
+  }
+
+  /**
+   * It sets a named attribute on an Attribute object at the resolved key.
+   *
+   * This is the one shape the narrow writer was already lucky with: an
+   * `Attribute` implements array access, so a name and a value written onto
+   * it land in its storage and the object survives. Pinned deliberately now
+   * rather than left to luck, because it is the shape `neo_class` handles on
+   * purpose and the one the permissive hash-prefix rule will widen the ways
+   * of reaching.
+   */
+  public function testSetsNamedAttributeOnAttributeObjectAtResolvedKey(): void {
+    $attribute = new Attribute(['class' => ['first'], 'id' => 'kept']);
+    $build = ['#markup' => 'x', '#attributes' => $attribute];
+
+    $result = $this->extension->setAttribute($build, 'data-role', 'panel');
+
+    $this->assertSame(
+      $attribute,
+      $result['#attributes'],
+      'The Attribute object is written into, not replaced.'
+    );
+    $this->assertSame(
+      [
+        'class' => ['first'],
+        'id' => 'kept',
+        'data-role' => 'panel',
+      ],
+      $attribute->toArray(),
+      'The named attribute joins what the object already carried.'
+    );
+  }
+
+  /**
+   * It leaves an array-shaped value behaving exactly as it did, for both.
+   *
+   * The guard on the branch split above. Learning two object shapes is only
+   * safe if the shape both writers already handled is untouched by it: an
+   * array-shaped value must still take neither the `Attribute` branch nor the
+   * `Url` one. So `neo_attributes` still hands back an `Attribute` where it
+   * found an array, `neo_attribute` still hands back the plain array it was
+   * given, and each still creates the property when the element carried none.
+   */
+  public function testLeavesArrayShapedAttributesValueBehavingExactlyAsItDid(): void {
+    $build = [
+      '#markup' => 'x',
+      '#attributes' => [
+        'class' => ['first'],
+        'id' => 'kept',
+      ],
+    ];
+
+    $merged = $this->extension->mergeAttributes($build, [
+      'class' => ['second'],
+      'data-role' => 'panel',
+    ]);
+
+    $this->assertInstanceOf(
+      Attribute::class,
+      $merged['#attributes'],
+      'An array found at the key still comes back as an Attribute.'
+    );
+    $this->assertSame(
+      [
+        'class' => ['first', 'second'],
+        'id' => 'kept',
+        'data-role' => 'panel',
+      ],
+      $merged['#attributes']->toArray(),
+      'And it still carries the same merge it always did.'
+    );
+    $this->assertSame(
+      ['class' => ['first'], 'id' => 'kept'],
+      $build['#attributes'],
+      'The array it was handed is not mutated in place.'
+    );
+
+    $set = $this->extension->setAttribute($build, 'data-role', 'panel');
+
+    $this->assertSame(
+      [
+        'class' => ['first'],
+        'id' => 'kept',
+        'data-role' => 'panel',
+      ],
+      $set['#attributes'],
+      'neo_attribute still leaves the property the plain array it was.'
+    );
+
+    $this->assertSame(
+      ['class' => ['only']],
+      $this->extension
+        ->mergeAttributes(['#markup' => 'x'], ['class' => ['only']])['#attributes']
+        ->toArray(),
+      'A missing property is still created by neo_attributes.'
+    );
+    $this->assertSame(
+      ['data-role' => 'panel'],
+      $this->extension->setAttribute(['#markup' => 'x'], 'data-role', 'panel')['#attributes'],
+      'A missing property is still created by neo_attribute.'
+    );
+  }
+
 }

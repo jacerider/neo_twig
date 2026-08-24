@@ -680,9 +680,26 @@ class TwigExtension extends AbstractExtension {
     }
     [$parents, $key, $element] = $target;
     $element[$key] = $element[$key] ?? [];
-    $elementAttributes = new Attribute($element[$key]);
-    $elementAttributes->merge($attributes);
-    $element[$key] = $elementAttributes;
+    if ($element[$key] instanceof Attribute) {
+      // An Attribute object is merged into rather than replaced, so anything
+      // still holding a handle to it sees the merge.
+      $element[$key]->merge($attributes);
+    }
+    elseif ($element[$key] instanceof Url) {
+      // A Url has nothing to iterate from outside, so building an attribute
+      // set out of it would replace it with an empty one. Merge into the
+      // url's own options instead and leave it a Url.
+      $options = $element[$key]->getOptions();
+      $urlAttributes = new Attribute($options['attributes'] ?? []);
+      $urlAttributes->merge($attributes);
+      $options['attributes'] = $urlAttributes->toArray();
+      $element[$key]->setOptions($options);
+    }
+    else {
+      $elementAttributes = new Attribute($element[$key]);
+      $elementAttributes->merge($attributes);
+      $element[$key] = $elementAttributes;
+    }
 
     // This writer hands over no payload, so it makes no link-element mirror.
     return $this->commitWriteTarget($build, $parents, $element);
@@ -711,8 +728,21 @@ class TwigExtension extends AbstractExtension {
     }
     [$parents, $key, $element] = $target;
     $element[$key] = $element[$key] ?? [];
-    $element[$key][$attribute] = $value;
     $mirror = [$attribute => $value];
+    if ($element[$key] instanceof Url) {
+      // A Url cannot be written to as an array. Set the attribute in the
+      // url's own options instead and leave it a Url. Nothing is handed over
+      // to mirror, because the payload never became an attribute set here.
+      $options = $element[$key]->getOptions();
+      $options['attributes'][$attribute] = $value;
+      $element[$key]->setOptions($options);
+      $mirror = NULL;
+    }
+    else {
+      // An Attribute object is written into through its array access; an
+      // array-shaped value is written into directly.
+      $element[$key][$attribute] = $value;
+    }
     return $this->commitWriteTarget($build, $parents, $element, $mirror);
   }
 
