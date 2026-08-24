@@ -478,20 +478,22 @@ class TwigExtension extends AbstractExtension {
    * "nothing to write to" with NULL, which every writer turns into the value
    * it was handed, untouched.
    *
+   * The hash-prefix rule is one rule for all three writers: the key is
+   * prefixed with a hash only when the element carries no bare key of that
+   * name. A bare key that is already there is a key something already reads,
+   * so the write goes where it is read.
+   *
    * @param array $build
    *   The renderable array being written to.
    * @param string|array $key
    *   The key to write to, or an array whose last entry is the key and whose
    *   earlier entries are a parents path to the element holding it.
-   * @param bool $permissive
-   *   When TRUE the key is prefixed with a hash only if the element carries no
-   *   bare key of that name. When FALSE the key is always prefixed.
    *
    * @return array|null
    *   A tuple of the parents path, the resolved key and the element found at
    *   that path, or NULL when there is nothing to write to.
    */
-  protected function resolveWriteTarget($build, $key, $permissive = FALSE) {
+  protected function resolveWriteTarget($build, $key) {
     $parents = [];
     if (is_array($key)) {
       $parents = $key;
@@ -499,7 +501,7 @@ class TwigExtension extends AbstractExtension {
     }
     $element = NestedArray::getValue($build, $parents);
     if ($element && is_array($element)) {
-      if (!$permissive || !isset($element[$key])) {
+      if (!isset($element[$key])) {
         // Make sure the key starts with a hash, so it's treated as a property.
         if (strpos($key, '#') !== 0) {
           $key = '#' . $key;
@@ -576,8 +578,7 @@ class TwigExtension extends AbstractExtension {
       return $build;
     }
 
-    // The permissive hash-prefix rule: only prefix when there is no bare key.
-    $target = $this->resolveWriteTarget($build, $key, TRUE);
+    $target = $this->resolveWriteTarget($build, $key);
     if ($target === NULL) {
       return $build;
     }

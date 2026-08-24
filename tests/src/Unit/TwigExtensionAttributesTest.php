@@ -25,14 +25,15 @@ use PHPUnit\Framework\Attributes\Group;
  * that URL's options — `neo_attributes` merging a whole attribute set,
  * `neo_attribute` setting one name.
  *
- * Two of the behaviours below are pinned as they stand. Each records a
- * **defect**, not an intention, so that the candidate which repairs it has to
- * edit an assertion that was expecting it:
+ * Both writers resolve their write target through the one seam that owns the
+ * **hash-prefix rule**, and there is one rule: a key is prefixed with `#`
+ * only when the element carries no bare key of that name. Same argument, same
+ * value, one destination — the same one `neo_class` resolves.
  *
- * - Both writers apply the strict **hash-prefix rule**: they *always* prefix.
- *   On a value carrying a bare `attributes` key they therefore write to
- *   `#attributes`, where `neo_class` writes to `attributes`. Same argument,
- *   same value, two destinations.
+ * One behaviour below is still pinned as it stands. It records a **defect**,
+ * not an intention, so that the candidate which repairs it has to edit an
+ * assertion that was expecting it:
+ *
  * - `neo_attribute` mirrors its write into `#options` on a `#type: link`
  *   element. `neo_attributes` does not, so a merge onto a link element misses
  *   the mirror the other two writers make.
@@ -293,37 +294,49 @@ final class TwigExtensionAttributesTest extends UnitTestCase {
   }
 
   /**
-   * It always writes to the hash-prefixed key, even when a bare one is there.
+   * It writes to a bare attributes key when the element carries one.
    *
-   * **Pinned as current behaviour.** Both writers prefix the key with `#`
-   * unconditionally, before the element is even resolved. A value carrying a
-   * bare `attributes` key — a preprocessed template variable, say — therefore
-   * gains a second, hash-prefixed property, and the bare one it already had is
-   * left behind untouched.
-   *
-   * `neo_class` does the opposite: it prefixes only when the bare key is
-   * absent, so the same argument against the same value writes to `attributes`
-   * there and `#attributes` here. That disagreement is the **hash-prefix
-   * rule**, and a later candidate unifies it; this is the half of it that
-   * lives in these two writers.
+   * The **hash-prefix rule**, and there is now one of them. A key is prefixed
+   * with `#` only when the element carries no bare key of that name, so a
+   * value holding a bare `attributes` key — a preprocessed template variable,
+   * say — is merged into where it stands rather than gaining a second,
+   * hash-prefixed property that nothing reads. This is the rule `neo_class`
+   * has always applied; `neo_attributes` used to prefix unconditionally and
+   * write past the key its caller could see.
    */
-  public function testAlwaysWritesToHashPrefixedKeyEvenBesideBareOne(): void {
+  public function testMergesIntoBareAttributesKeyWhenElementCarriesOne(): void {
     $merged = $this->extension->mergeAttributes(
       ['attributes' => ['class' => ['first']]],
       ['class' => ['second']]
     );
 
-    $this->assertSame(
-      ['class' => ['first']],
+    $this->assertInstanceOf(
+      Attribute::class,
       $merged['attributes'],
-      'neo_attributes leaves the bare key exactly as it found it.'
+      'The bare key the value already carried is the one written to.'
     );
     $this->assertSame(
-      ['class' => ['second']],
-      $merged['#attributes']->toArray(),
-      'The merge lands on a second, hash-prefixed property beside it.'
+      ['class' => ['first', 'second']],
+      $merged['attributes']->toArray(),
+      'The incoming set is merged over what the bare key already held.'
     );
+    $this->assertArrayNotHasKey(
+      '#attributes',
+      $merged,
+      'No second, hash-prefixed property is invented beside the bare one.'
+    );
+  }
 
+  /**
+   * It writes to a bare attributes key when the element carries one.
+   *
+   * The same rule reaches the narrow writer, because both resolve their write
+   * target through the one seam that owns it. A bare `attributes` key already
+   * on the value is a key something already reads, so the named attribute is
+   * set there; nothing is written past it to a hash-prefixed property beside
+   * it. `neo_attribute` used to do exactly that.
+   */
+  public function testSetsNamedAttributeOnBareAttributesKeyWhenElementCarriesOne(): void {
     $set = $this->extension->setAttribute(
       ['attributes' => ['data-role' => 'first']],
       'data-role',
@@ -331,14 +344,51 @@ final class TwigExtensionAttributesTest extends UnitTestCase {
     );
 
     $this->assertSame(
-      ['data-role' => 'first'],
-      $set['attributes'],
-      'neo_attribute leaves the bare key exactly as it found it.'
-    );
-    $this->assertSame(
       ['data-role' => 'second'],
+      $set['attributes'],
+      'The bare key the value already carried is the one written to.'
+    );
+    $this->assertArrayNotHasKey(
+      '#attributes',
+      $set,
+      'No second, hash-prefixed property is invented beside the bare one.'
+    );
+  }
+
+  /**
+   * It still hash-prefixes when the element carries no bare key of that name.
+   *
+   * The other half of the one rule, and the half that did not move. With
+   * nothing bare to write to, the key is prefixed and the property is created
+   * — for both writers here, and for `neo_class`, whose half of this stays
+   * pinned and unmoved in TwigExtensionAddClassTest. A bare key is never
+   * created when one was not already there.
+   */
+  public function testStillHashPrefixesWhenElementCarriesNoBareKey(): void {
+    $merged = $this->extension->mergeAttributes(['#markup' => 'x'], ['class' => ['second']]);
+
+    $this->assertSame(
+      ['class' => ['second']],
+      $merged['#attributes']->toArray(),
+      'neo_attributes creates the hash-prefixed property when no bare key is there.'
+    );
+    $this->assertArrayNotHasKey(
+      'attributes',
+      $merged,
+      'neo_attributes never invents a bare key that was not already there.'
+    );
+
+    $set = $this->extension->setAttribute(['#markup' => 'x'], 'data-role', 'panel');
+
+    $this->assertSame(
+      ['data-role' => 'panel'],
       $set['#attributes'],
-      'The write lands on a second, hash-prefixed property beside it.'
+      'neo_attribute creates the hash-prefixed property when no bare key is there.'
+    );
+    $this->assertArrayNotHasKey(
+      'attributes',
+      $set,
+      'neo_attribute never invents a bare key that was not already there.'
     );
   }
 
@@ -580,8 +630,8 @@ final class TwigExtensionAttributesTest extends UnitTestCase {
    * `Attribute` implements array access, so a name and a value written onto
    * it land in its storage and the object survives. Pinned deliberately now
    * rather than left to luck, because it is the shape `neo_class` handles on
-   * purpose and the one the permissive hash-prefix rule will widen the ways
-   * of reaching.
+   * purpose and the one the permissive hash-prefix rule widens the ways of
+   * reaching.
    */
   public function testSetsNamedAttributeOnAttributeObjectAtResolvedKey(): void {
     $attribute = new Attribute(['class' => ['first'], 'id' => 'kept']);
