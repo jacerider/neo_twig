@@ -216,10 +216,10 @@ final class TwigExtensionSilentGuardsTest extends UnitTestCase {
    *
    * Handed an array as the key, the three writers treat the last entry as the
    * key and everything before it as a parents path. `NestedArray::getValue()`
-   * answers `NULL` for a path that is not there, and the mutation then sits
-   * behind `if ($element && is_array($element))` — so a path that misses does
-   * nothing whatsoever: no key is created along the way, no attribute set is
-   * seeded at the end of it, and the array comes back exactly as it went in.
+   * answers `NULL` for a path that is not there, and the resolver they share
+   * sits behind `if ($element && is_array($element))` — so a path that misses
+   * does nothing whatsoever: no key is created along the way, no attribute set
+   * is seeded at the end of it, and the array comes back exactly as it went in.
    *
    * Three shapes miss, not one. The path can be absent; it can land on a value
    * that is not an array; and — because the guard tests truthiness before it
@@ -258,9 +258,9 @@ final class TwigExtensionSilentGuardsTest extends UnitTestCase {
     );
 
     $this->assertSame(
-      ['addClass', 'mergeAttributes', 'setAttribute'],
+      ['resolveWriteTarget'],
       self::methodsCarrying('if ($element && is_array($element)) {'),
-      'Those three are every helper in the class that resolves a parents path.'
+      'That one resolver is every place in the class resolving a parents path.'
     );
   }
 

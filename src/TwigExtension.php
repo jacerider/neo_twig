@@ -471,6 +471,86 @@ class TwigExtension extends AbstractExtension {
   }
 
   /**
+   * Resolve the write target for an attribute writer.
+   *
+   * Splits a parents path out of the key argument, applies the hash-prefix
+   * rule to what is left and fetches the element the write lands on. Answers
+   * "nothing to write to" with NULL, which every writer turns into the value
+   * it was handed, untouched.
+   *
+   * @param array $build
+   *   The renderable array being written to.
+   * @param string|array $key
+   *   The key to write to, or an array whose last entry is the key and whose
+   *   earlier entries are a parents path to the element holding it.
+   * @param bool $permissive
+   *   When TRUE the key is prefixed with a hash only if the element carries no
+   *   bare key of that name. When FALSE the key is always prefixed.
+   *
+   * @return array|null
+   *   A tuple of the parents path, the resolved key and the element found at
+   *   that path, or NULL when there is nothing to write to.
+   */
+  protected function resolveWriteTarget($build, $key, $permissive = FALSE) {
+    $parents = [];
+    if (is_array($key)) {
+      $parents = $key;
+      $key = array_pop($parents);
+    }
+    $element = NestedArray::getValue($build, $parents);
+    if ($element && is_array($element)) {
+      if (!$permissive || !isset($element[$key])) {
+        // Make sure the key starts with a hash, so it's treated as a property.
+        if (strpos($key, '#') !== 0) {
+          $key = '#' . $key;
+        }
+      }
+      return [$parents, $key, $element];
+    }
+    return NULL;
+  }
+
+  /**
+   * Commit a written element back through its parents path.
+   *
+   * Applies the link-element mirror before the write-back: a #type link
+   * element renders out of its #options rather than out of the property that
+   * was just written, so a writer that has an array-shaped payload to mirror
+   * hands it over here. A writer with no payload gets no mirror.
+   *
+   * @param array $build
+   *   The renderable array being written to.
+   * @param array $parents
+   *   The parents path the element was found at.
+   * @param array $element
+   *   The element, with the writer's write already applied.
+   * @param array|null $mirror
+   *   Attributes to mirror into a link element's options, keyed by attribute
+   *   name, or NULL to mirror nothing. An array value is merged onto whatever
+   *   the options already held; anything else replaces it.
+   *
+   * @return array
+   *   The renderable array with the element written back into it.
+   */
+  protected function commitWriteTarget($build, $parents, $element, $mirror = NULL) {
+    $isLink = !empty($element['#type']) && $element['#type'] === 'link';
+    // Link elements have a different structure.
+    if ($mirror !== NULL && $isLink) {
+      foreach ($mirror as $name => $value) {
+        if (is_array($value)) {
+          $held = $element['#options']['attributes'][$name] ?? [];
+          $element['#options']['attributes'][$name] = array_merge($held, $value);
+        }
+        else {
+          $element['#options']['attributes'][$name] = $value;
+        }
+      }
+    }
+    NestedArray::setValue($build, $parents, $element);
+    return $build;
+  }
+
+  /**
    * Add classes to a renderable array.
    */
   public function addClass($build, $classes, $key = 'attributes') {
@@ -496,38 +576,27 @@ class TwigExtension extends AbstractExtension {
       return $build;
     }
 
-    $parents = [];
-    if (is_array($key)) {
-      $parents = $key;
-      $key = array_pop($parents);
+    // The permissive hash-prefix rule: only prefix when there is no bare key.
+    $target = $this->resolveWriteTarget($build, $key, TRUE);
+    if ($target === NULL) {
+      return $build;
     }
-    $element = NestedArray::getValue($build, $parents);
-    if ($element && is_array($element)) {
-      if (!isset($element[$key])) {
-        // Make sure the key starts with a hash, so it's treated as a property.
-        if (strpos($key, '#') !== 0) {
-          $key = '#' . $key;
-        }
-      }
-      $element[$key] = $element[$key] ?? [];
-      if ($element[$key] instanceof Attribute) {
-        $element[$key] = $element[$key]->addClass($classes);
-      }
-      elseif ($element[$key] instanceof Url) {
-        $options = $element[$key]->getOptions();
-        $options['attributes']['class'] = array_merge($options['attributes']['class'] ?? [], $classes);
-        $element[$key]->setOptions($options);
-      }
-      else {
-        $element[$key]['class'] = array_merge($element[$key]['class'] ?? [], $classes);
-        // Link elements have a different structure.
-        if (!empty($element['#type']) && $element['#type'] === 'link') {
-          $element['#options']['attributes']['class'] = array_merge($element['#options']['attributes']['class'] ?? [], $element[$key]['class']);
-        }
-      }
-      NestedArray::setValue($build, $parents, $element);
+    [$parents, $key, $element] = $target;
+    $element[$key] = $element[$key] ?? [];
+    $mirror = NULL;
+    if ($element[$key] instanceof Attribute) {
+      $element[$key] = $element[$key]->addClass($classes);
     }
-    return $build;
+    elseif ($element[$key] instanceof Url) {
+      $options = $element[$key]->getOptions();
+      $options['attributes']['class'] = array_merge($options['attributes']['class'] ?? [], $classes);
+      $element[$key]->setOptions($options);
+    }
+    else {
+      $element[$key]['class'] = array_merge($element[$key]['class'] ?? [], $classes);
+      $mirror = ['class' => $element[$key]['class']];
+    }
+    return $this->commitWriteTarget($build, $parents, $element, $mirror);
   }
 
   /**
@@ -605,25 +674,18 @@ class TwigExtension extends AbstractExtension {
     if (!is_array($build)) {
       return $build;
     }
-    $parents = [];
-    if (is_array($key)) {
-      $parents = $key;
-      $key = array_pop($parents);
+    $target = $this->resolveWriteTarget($build, $key);
+    if ($target === NULL) {
+      return $build;
     }
-    // Make sure the key starts with a hash, so it's treated as a property.
-    if (strpos($key, '#') !== 0) {
-      $key = '#' . $key;
-    }
-    $element = NestedArray::getValue($build, $parents);
-    if ($element && is_array($element)) {
-      $element[$key] = $element[$key] ?? [];
-      $elementAttributes = new Attribute($element[$key]);
-      $elementAttributes->merge($attributes);
-      $element[$key] = $elementAttributes;
-      NestedArray::setValue($build, $parents, $element);
-    }
+    [$parents, $key, $element] = $target;
+    $element[$key] = $element[$key] ?? [];
+    $elementAttributes = new Attribute($element[$key]);
+    $elementAttributes->merge($attributes);
+    $element[$key] = $elementAttributes;
 
-    return $build;
+    // This writer hands over no payload, so it makes no link-element mirror.
+    return $this->commitWriteTarget($build, $parents, $element);
   }
 
   /**
@@ -643,25 +705,15 @@ class TwigExtension extends AbstractExtension {
     if (!is_array($build)) {
       return $build;
     }
-    $parents = [];
-    if (is_array($key)) {
-      $parents = $key;
-      $key = array_pop($parents);
+    $target = $this->resolveWriteTarget($build, $key);
+    if ($target === NULL) {
+      return $build;
     }
-    // Make sure the key starts with a hash, so it's treated as a property.
-    if (strpos($key, '#') !== 0) {
-      $key = '#' . $key;
-    }
-    $element = NestedArray::getValue($build, $parents);
-    if ($element && is_array($element)) {
-      $element[$key] = $element[$key] ?? [];
-      $element[$key][$attribute] = $value;
-      if (!empty($element['#type']) && $element['#type'] === 'link') {
-        $element['#options']['attributes'][$attribute] = $value;
-      }
-      NestedArray::setValue($build, $parents, $element);
-    }
-    return $build;
+    [$parents, $key, $element] = $target;
+    $element[$key] = $element[$key] ?? [];
+    $element[$key][$attribute] = $value;
+    $mirror = [$attribute => $value];
+    return $this->commitWriteTarget($build, $parents, $element, $mirror);
   }
 
   /**
