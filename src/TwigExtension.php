@@ -990,6 +990,32 @@ class TwigExtension extends AbstractExtension {
    * provided key and value. For example ['#field_name' => 'title'].
    * {{ build|neo_child_class('my-class', 'wrapper_attributes',
    * 'field_name', 'title') }}
+   *
+   * @param array<string|int, mixed> $build
+   *   The renderable walked: a render array, each of whose children is handed
+   *   to `neo_class`. An empty value, and a render array holding no children,
+   *   are both handed straight back unwalked and say so under the **debug
+   *   gate**. A non-empty value that is not an array is the one shape outside
+   *   this union that raises rather than coming back.
+   * @param string|array<int, string|array<int, string>> $classes
+   *   A single class, a list of classes, or a list containing a list. A member
+   *   that is itself a list is imploded on a space, so a nested list still
+   *   arrives as a flat class list.
+   * @param string|non-empty-array<int, string> $key
+   *   The key to write to, or an array whose last entry is the key and whose
+   *   earlier entries are a parents path to the element holding it.
+   * @param string|null $prop
+   *   The render-array property to filter the children on, hash-prefixed here
+   *   if it did not arrive that way, so `field_name` and `#field_name` pick
+   *   out the same children. NULL walks every child.
+   * @param mixed $propValue
+   *   The value that property has to hold, compared with `===`. The filter is
+   *   a conjunction of the two: a property name given without a value narrows
+   *   nothing, and every child is walked.
+   *
+   * @return array<string|int, mixed>
+   *   The render array it was handed, with the classes added to every child it
+   *   walked. A value it could not walk comes back exactly as it went in.
    */
   public function addChildClass($build, $classes, $key = 'attributes', $prop = NULL, $propValue = NULL) {
     if (empty($build)) {
@@ -1024,6 +1050,28 @@ class TwigExtension extends AbstractExtension {
 
   /**
    * Adds classes to the items under a named property (`neo_property_class`).
+   *
+   * @param array<string|int, mixed> $build
+   *   The renderable walked: a render array holding the property, each of
+   *   whose items is handed to `neo_class`. Anything else — an empty value, a
+   *   scalar, some other object — is handed straight back unwalked, and says
+   *   so under the **debug gate**.
+   * @param string|array<int, string|array<int, string>> $classes
+   *   A single class, a list of classes, or a list containing a list. A member
+   *   that is itself a list is imploded on a space, so a nested list still
+   *   arrives as a flat class list.
+   * @param string $property
+   *   The render-array property whose items are walked, hash-prefixed here if
+   *   it did not arrive that way. There is no bare-key fallback: `items` and
+   *   `#items` both look under `#items` and nowhere else.
+   * @param string|non-empty-array<int, string> $key
+   *   The key to write to, or an array whose last entry is the key and whose
+   *   earlier entries are a parents path to the element holding it.
+   *
+   * @return array<string|int, mixed>
+   *   The render array it was handed, with the classes added to every item
+   *   under the property. A value it could not walk comes back exactly as it
+   *   went in.
    */
   public function addPropertyClass($build, $classes, $property = 'items', $key = 'attributes') {
     if (empty($build)) {
@@ -1187,6 +1235,24 @@ class TwigExtension extends AbstractExtension {
 
   /**
    * Sets an attribute on every child of a renderable (`neo_child_attribute`).
+   *
+   * @param array<string|int, mixed> $build
+   *   The renderable walked: a render array, each of whose children is handed
+   *   to `neo_attribute`. An empty value, and a render array holding no
+   *   children, are both handed straight back unwalked and say so under the
+   *   **debug gate**. A non-empty value that is not an array is the one shape
+   *   outside this union that raises rather than coming back.
+   * @param string $attribute
+   *   The attribute name.
+   * @param string $value
+   *   The attribute value.
+   * @param string|non-empty-array<int, string> $key
+   *   The key to write to, or an array whose last entry is the key and whose
+   *   earlier entries are a parents path to the element holding it.
+   *
+   * @return array<string|int, mixed>
+   *   The render array it was handed, with the attribute set on every child it
+   *   walked. A value it could not walk comes back exactly as it went in.
    */
   public function setChildAttribute($build, string $attribute, string $value, $key = 'attributes') {
     if (empty($build)) {
@@ -1408,12 +1474,12 @@ class TwigExtension extends AbstractExtension {
   /**
    * Filters out the children of a render array, optionally sorted by weight.
    *
-   * @param array $build
+   * @param array<string|int, mixed> $build
    *   The render array whose children are to be filtered.
    * @param bool $sort
    *   Boolean to indicate whether the children should be sorted by weight.
    *
-   * @return array
+   * @return array<string|int, mixed>
    *   The element's children.
    */
   public static function childrenFilter(array $build, bool $sort = FALSE): array {
