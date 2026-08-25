@@ -458,7 +458,7 @@ class TwigExtension extends AbstractExtension {
       new TwigFilter('neo_raw', [$this, 'getRawValues']),
       new TwigFilter('neo_target_entity', [$this, 'getTargetEntity']),
       new TwigFilter('neo_children', [self::class, 'childrenFilter']),
-      new TwigFilter('neo_field', [self::class, 'renderField']),
+      new TwigFilter('neo_field', [$this, 'renderField']),
     ];
   }
 
@@ -477,6 +477,7 @@ class TwigExtension extends AbstractExtension {
    */
   public function getOembed(string $url, int $max_width = 0, int $max_height = 0): array {
     if (empty($url)) {
+      $this->notice('neo_oembed', self::OEMBED_EXPECTS_URL, $url);
       return [];
     }
 
@@ -592,6 +593,7 @@ class TwigExtension extends AbstractExtension {
       // string so an un-updated template degrades to a dead href rather than
       // navigating somewhere the author never named. Suppressing the anchor
       // itself is the template's job: guard on the uri before calling this.
+      $this->notice('neo_uri', self::URI_EXPECTS_LINKING, $uri);
       return '';
     }
     try {
@@ -599,10 +601,18 @@ class TwigExtension extends AbstractExtension {
     }
     catch (\Exception $e) {
       try {
+        // Resolving here after the first pass threw is a successful two-stage
+        // resolution rather than a give-up, so it says nothing: every rooted
+        // path, bare fragment and query string a template holds arrives this
+        // way, and a notice would fire on the most ordinary call this helper
+        // receives.
         return Url::fromUserInput($uri, $options)->toString();
       }
       catch (\Exception $e) {
-        // If the URI is invalid.
+        // If the URI is invalid. Both passes failed, so the visitor is sent to
+        // the front page instead of anywhere the author named — which is the
+        // one answer here worth saying out loud.
+        $this->notice('neo_uri', self::URI_EXPECTS_RESOLVABLE, $uri);
         return '/';
       }
     }
@@ -735,6 +745,73 @@ class TwigExtension extends AbstractExtension {
    * is indistinguishable from the three misses before it.
    */
   private const FIELD_EXPECTS_REFERENCE = 'a reference field pointing at an entity';
+
+  /**
+   * What neo_field expects to be handed.
+   *
+   * The first of four reasons this filter answers `NULL`, and the only one
+   * that is about the argument's type rather than its contents: a string, an
+   * object or anything else a template can pipe never had an entity in it to
+   * find.
+   */
+  private const RENDER_FIELD_EXPECTS = 'a render array to find an entity in';
+
+  /**
+   * What neo_field expects that render array to name.
+   *
+   * The view mode is read off the build rather than passed in, so a build that
+   * carries none cannot say how to render anything. `empty()` decides, so a
+   * `#view_mode` of `''` is this reason too — the same miss from the other
+   * side, and deliberately not a fifth phrase.
+   */
+  private const RENDER_FIELD_EXPECTS_VIEW_MODE = 'a render array carrying the view mode to render in';
+
+  /**
+   * What neo_field expects to find among the render array's values.
+   *
+   * The filter takes no entity argument: it sweeps the build for the first
+   * value that is a content entity and asks that one. A build with none is
+   * usually one a preprocess rebuilt, or the wrong half of an entity-reference
+   * build.
+   */
+  private const RENDER_FIELD_EXPECTS_ENTITY = 'a render array holding a content entity';
+
+  /**
+   * What neo_field expects the entity it found to have.
+   *
+   * The single most useful notice in the module, which is why it is a format
+   * string rather than a phrase: a typo in a field name has been an empty
+   * region and nothing else, and an answer that did not name the field would
+   * leave the author exactly where they started.
+   */
+  private const RENDER_FIELD_EXPECTS_FIELD = 'a field named "%s" on the entity it found';
+
+  /**
+   * What neo_uri expects a uri it is asked for a url to be.
+   *
+   * The three **non-linking uri** routes are deliberately path-less and the
+   * empty string is the correct answer for them, but from inside a template it
+   * is an anchor that silently goes nowhere.
+   */
+  private const URI_EXPECTS_LINKING = 'a uri that links somewhere';
+
+  /**
+   * What neo_uri expects when neither resolution pass could answer.
+   *
+   * The `/` fallback, which is what this helper's three past bug fixes were
+   * all about: rather than fatalling the page it is printed on, an
+   * unresolvable uri quietly becomes a link to the front page.
+   */
+  private const URI_EXPECTS_RESOLVABLE = 'a uri Drupal can resolve to a url';
+
+  /**
+   * What neo_oembed expects to be handed.
+   *
+   * Its other empty answer — a resource that could not be fetched — already
+   * logs an error unconditionally and loudly, which is right for a remote
+   * call, and is not routed through this seam.
+   */
+  private const OEMBED_EXPECTS_URL = 'a url to fetch an oEmbed resource for';
 
   /**
    * Resolve the write target for an attribute writer.
@@ -1296,6 +1373,20 @@ class TwigExtension extends AbstractExtension {
   /**
    * Render a field from an entity reference render array.
    *
+   * Answers `NULL` for four different reasons and, with the **debug gate** on,
+   * says which one: the value was never a render array, it carries no view
+   * mode to render in, it holds no content entity to ask, or the entity it
+   * found has no field by the name it was given. The last of those is the
+   * single most useful notice in the module — a typo in a field name has been
+   * an empty region and nothing else.
+   *
+   * **Not static, deliberately.** This was registered as a class-static
+   * callable, and a static method cannot read the gate those notices sit
+   * behind, because the gate is an instance property. The **registered name**
+   * — `neo_field` — is unchanged, which is the contract; the only thing that
+   * moved is a PHP method nothing outside this module calls. `neo_children`
+   * next door stays static, because it makes no notice and needs no gate.
+   *
    * @param array $build
    *   The render array whose children are to be filtered.
    * @param string $field_id
@@ -1304,19 +1395,44 @@ class TwigExtension extends AbstractExtension {
    * @return array
    *   The element's children.
    */
-  public static function renderField($build, string $field_id): array|null {
+  public function renderField($build, string $field_id): array|null {
     if (!is_array($build) || empty($build['#view_mode'])) {
+      // One guard, two reasons. A value that was never a render array could
+      // not have held an entity at all; a build that carries no view mode may
+      // hold one and cannot say how to render it. Both still answer the same
+      // NULL they always did, and only what the notice says it expected moves.
+      //
+      // The guard itself stays whole rather than being split in two. The
+      // characterisation suite censuses the bare non-array guard as belonging
+      // to the three attribute writers — the helpers that hand the value back
+      // rather than answering NULL — by reading this class's own source, so a
+      // second copy of that line here would enrol this filter in a census it
+      // does not belong to.
+      if (is_array($build)) {
+        // What was found at that key rather than the build it sat in: an
+        // absent view mode and one that is the empty string are the same miss
+        // arrived at from two sides.
+        $this->notice('neo_field', self::RENDER_FIELD_EXPECTS_VIEW_MODE, $build['#view_mode'] ?? NULL);
+      }
+      else {
+        $this->notice('neo_field', self::RENDER_FIELD_EXPECTS, $build);
+      }
       return NULL;
     }
     $entity = array_filter($build, function ($entity) {
       return $entity instanceof ContentEntityInterface;
     });
     if (empty($entity)) {
+      $this->notice('neo_field', self::RENDER_FIELD_EXPECTS_ENTITY, $build);
       return NULL;
     }
     /** @var \Drupal\Core\Entity\ContentEntityInterface $entity */
     $entity = reset($entity);
     if (!$entity->hasField($field_id)) {
+      // The entity rather than the build, because everything the filter asked
+      // for was there and the only thing left to say is which entity was
+      // asked — the field it could not find is named in the expectation.
+      $this->notice('neo_field', sprintf(self::RENDER_FIELD_EXPECTS_FIELD, $field_id), $entity);
       return NULL;
     }
     return $entity->get($field_id)->view($build['#view_mode']);

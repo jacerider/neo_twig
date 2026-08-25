@@ -60,6 +60,19 @@ use Symfony\Component\ErrorHandler\BufferingLogger;
  * touched and is pinned in the unit class with the other three filters behind
  * the same gate.
  *
+ * **`neo_field`'s four reasons say which one fired too**, and its criteria are
+ * here for the same reason: the last of them — the entity has no field by the
+ * name it was given — needs a real content entity to ask, and it is the single
+ * most useful notice in the module, because a typo in a field name has been an
+ * empty region and nothing else. Its first three reasons are driven here
+ * alongside it rather than split off, because all four are one filter's answer
+ * and asserting that no two of them read the same is the whole criterion.
+ *
+ * `neo_field` is also called on the extension instance below rather than on the
+ * class. Its callback stopped being static so that it can read the **debug
+ * gate**, which a class-static callable cannot reach; the **registered name**
+ * is unchanged, and the assertions about what it answers are untouched.
+ *
  * The notice criteria read the **notice log** through the buffering logger
  * registered below, the same way the `neo_oembed` class reads its one
  * unconditional error, because the seam logs through `\Drupal::logger()` and
@@ -315,7 +328,7 @@ final class TwigExtensionEntityFiltersTest extends KernelTestBase {
     ]);
     $entity->save();
 
-    $default = TwigExtension::renderField([
+    $default = $this->extension->renderField([
       '#view_mode' => 'default',
       '#object' => $entity,
     ], 'field_text');
@@ -334,7 +347,7 @@ final class TwigExtensionEntityFiltersTest extends KernelTestBase {
     // The `test` display shows the same field with its label above. The only
     // thing that changes between the two calls is the build's `#view_mode`, so
     // a difference in the output can come from nothing else.
-    $teaser = TwigExtension::renderField([
+    $teaser = $this->extension->renderField([
       '#view_mode' => 'test',
       '#object' => $entity,
     ], 'field_text');
@@ -369,25 +382,25 @@ final class TwigExtensionEntityFiltersTest extends KernelTestBase {
     $entity->save();
 
     $this->assertNull(
-      TwigExtension::renderField(['#object' => $entity], 'field_text'),
+      $this->extension->renderField(['#object' => $entity], 'field_text'),
       'A build carrying no view mode answers NULL.'
     );
     $this->assertNull(
-      TwigExtension::renderField([
+      $this->extension->renderField([
         '#view_mode' => '',
         '#object' => $entity,
       ], 'field_text'),
       'An empty view mode is the same miss as an absent one.'
     );
     $this->assertNull(
-      TwigExtension::renderField([
+      $this->extension->renderField([
         '#view_mode' => 'default',
         '#object' => 'not an entity',
       ], 'field_text'),
       'A build with no content entity among its values answers NULL.'
     );
     $this->assertNull(
-      TwigExtension::renderField([
+      $this->extension->renderField([
         '#view_mode' => 'default',
         '#object' => $entity,
       ], 'field_nope'),
@@ -689,6 +702,179 @@ final class TwigExtensionEntityFiltersTest extends KernelTestBase {
         '#theme' => 'field',
         '#field_name' => 'field_single_ref',
         '#entity' => $parent,
+      ],
+    ];
+  }
+
+  /**
+   * Tests that neo_field answers NULL for every reason, in both gate states.
+   *
+   * The characterisation criterion above drives the same misses with the
+   * **debug gate** off, which is the state roughly thirty deployed sites run
+   * in. This one repeats every reason `neo_field` gives up with the gate on as
+   * well, because that is the state a notice exists in and the state in which
+   * a diagnostic could accidentally become a behaviour change.
+   *
+   * Nothing about the answer moves: a value that is not an array, a build
+   * carrying no view mode, a build with no content entity among its values and
+   * a field the entity does not have all still answer `NULL`, and the one call
+   * that works still renders the field. Four `NULL`s stop reading the same;
+   * none of them stops being `NULL`.
+   *
+   * The build handed in comes back out of the call exactly as it went in as
+   * well. `neo_field` answers a fresh render array or nothing at all, so there
+   * is never anything to carry an **inline notice** — a filter that decorated
+   * its argument instead would leave the notice on the caller's own build.
+   */
+  public function testAnswersNullFromNeoFieldForEveryReasonInBothGateStates(): void {
+    $entity = EntityTest::create([
+      'name' => 'Parent',
+      'field_text' => 'Rendered value',
+    ]);
+    $entity->save();
+
+    foreach (['off' => FALSE, 'on' => TRUE] as $state => $gate) {
+      $extension = new TwigExtension(['debug' => $gate]);
+
+      foreach ($this->renderFieldMisses($entity) as $label => [$build, $field_id]) {
+        $handed = $build;
+
+        $this->assertNull(
+          $extension->renderField($build, $field_id),
+          'With the gate ' . $state . ', neo_field answers NULL for ' . $label . '.'
+        );
+        $this->assertSame(
+          $handed,
+          $build,
+          'With the gate ' . $state . ', ' . $label . ' comes back exactly as it was handed over.'
+        );
+      }
+
+      $rendered = $extension->renderField([
+        '#view_mode' => 'default',
+        '#object' => $entity,
+      ], 'field_text');
+
+      $this->assertIsArray(
+        $rendered,
+        'With the gate ' . $state . ', the call that works still renders the field.'
+      );
+      $this->assertSame(
+        'field_text',
+        $rendered['#field_name'],
+        'With the gate ' . $state . ', it is still the named field that comes back.'
+      );
+    }
+  }
+
+  /**
+   * Tests that it notices each of neo_field's four reasons, distinctly.
+   *
+   * `neo_field` is the quietest helper in the module and the one whose silence
+   * costs most: a typo in a field name is an empty region and nothing else.
+   * Four different mistakes have answered the same `NULL` — a value that was
+   * never a render array, a build that names no view mode to render in, a
+   * build holding no content entity to ask, and an entity that has no field by
+   * the name it was given — and none of them said which.
+   *
+   * So the four are asserted **against each other**: four reasons, four
+   * expectations, no two alike. Every line names `neo_field`, the **registered
+   * name** a template author types, and none of them names `renderField`, the
+   * PHP method behind it, which is not something a template author has ever
+   * seen.
+   *
+   * The last of the four is the one this plan calls the single most useful
+   * notice in the module, so it is asserted twice over: it is its own reason,
+   * and it **names the field it could not find**, because "field_nope is not a
+   * field on this entity" is the whole answer and a phrase without the name in
+   * it would leave the author exactly where they started.
+   *
+   * An absent view mode and an empty one are asserted to be the *same* reason,
+   * because they are: `empty()` is what decides, and a build carrying
+   * `#view_mode => ''` is the same miss arrived at from the other side.
+   */
+  public function testNoticesEachOfNeoFieldsFourReasonsAsItsOwnExpectation(): void {
+    $entity = EntityTest::create([
+      'name' => 'Parent',
+      'field_text' => 'Rendered value',
+    ]);
+    $entity->save();
+
+    $said = [];
+    foreach ($this->renderFieldMisses($entity) as $label => [$build, $field_id]) {
+      $this->cleanLogs();
+      $extension = new TwigExtension(['debug' => TRUE]);
+
+      $this->assertNull(
+        $extension->renderField($build, $field_id),
+        $label . ' still answers NULL.'
+      );
+
+      $lines = $this->noticeLines();
+
+      $this->assertCount(1, $lines, 'neo_field says something about ' . $label . '.');
+      $this->assertStringContainsString(
+        'neo_field',
+        $lines[0],
+        'The line for ' . $label . ' names neo_field.'
+      );
+      $this->assertStringNotContainsString(
+        'renderField',
+        $lines[0],
+        'The line for ' . $label . ' never names the PHP method behind it.'
+      );
+      $said[$label] = $this->expectationIn($lines[0]);
+    }
+
+    $four = [
+      'a value that was never a render array' => $said['a value that is not an array at all'],
+      'a build naming no view mode' => $said['a build carrying no view mode'],
+      'a build holding no content entity' => $said['a build with no content entity among its values'],
+      'an entity with no field by that name' => $said['a field the entity does not have'],
+    ];
+
+    $this->assertSame(
+      $four,
+      array_unique($four),
+      "neo_field's four reasons expect four different things."
+    );
+    $this->assertStringContainsString(
+      'field_nope',
+      $said['a field the entity does not have'],
+      'The notice names the field it could not find.'
+    );
+    $this->assertSame(
+      $said['a build carrying no view mode'],
+      $said['a build whose view mode is the empty string'],
+      'An absent view mode and an empty one are one reason: empty() is what decides.'
+    );
+  }
+
+  /**
+   * Every way neo_field answers NULL instead of rendering a field.
+   *
+   * @param \Drupal\entity_test\Entity\EntityTest $entity
+   *   A saved entity for the builds that carry one.
+   *
+   * @return array<string, array>
+   *   The build to hand the filter and the field id to ask it for, keyed by
+   *   how a failure message names the reason.
+   */
+  private function renderFieldMisses(EntityTest $entity): array {
+    return [
+      'a value that is not an array at all' => ['not a render array', 'field_text'],
+      'a build carrying no view mode' => [['#object' => $entity], 'field_text'],
+      'a build whose view mode is the empty string' => [
+        ['#view_mode' => '', '#object' => $entity],
+        'field_text',
+      ],
+      'a build with no content entity among its values' => [
+        ['#view_mode' => 'default', '#object' => 'not an entity'],
+        'field_text',
+      ],
+      'a field the entity does not have' => [
+        ['#view_mode' => 'default', '#object' => $entity],
+        'field_nope',
       ],
     ];
   }

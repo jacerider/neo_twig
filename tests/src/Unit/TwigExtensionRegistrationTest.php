@@ -71,10 +71,10 @@ final class TwigExtensionRegistrationTest extends UnitTestCase {
   /**
    * Every registered name and the method behind it.
    *
-   * The filters first, then the functions, both in registration order. Two of
-   * the twelve filters are registered against the class rather than the
-   * instance — `neo_children` and `neo_field` are static — which the callable
-   * assertions below distinguish without needing a second list.
+   * The filters first, then the functions, both in registration order. One of
+   * the twelve filters is registered against the class rather than the
+   * instance — `neo_children` is static — which the callable assertions below
+   * distinguish without needing a second list.
    *
    * @var array<string, string>
    */
@@ -163,6 +163,68 @@ final class TwigExtensionRegistrationTest extends UnitTestCase {
       self::HELPER_METHODS,
       $methods,
       'Every registered name resolves to the documented method, and no name is registered twice.'
+    );
+  }
+
+  /**
+   * Tests that neo_field is registered against a callable that reads the gate.
+   *
+   * The one PHP-level move in the whole notice plan, and the criterion that
+   * says what did **not** move with it. `neo_field` has four silent `NULL`
+   * returns, one of which is "that entity has no field by that name" — the
+   * single most useful notice in the module — and a class-static callable
+   * cannot read the **debug gate** those notices sit behind, because the gate
+   * is an instance property. So the callback becomes an instance method and
+   * the registration points at the extension itself.
+   *
+   * The **registered name** is the contract, and it is unchanged: a template
+   * that types `|neo_field('field_x')` is unaffected, which is what the
+   * assertion on the name and on the method behind it says. The only thing
+   * that moved is a PHP method nothing outside this module calls.
+   *
+   * `neo_children` is asserted alongside it as the deliberate counterexample.
+   * It gains no notice — returning no children is its answer rather than a job
+   * left undone — so it needs no gate, and its callback stays exactly where it
+   * was. Without that half, a future change that moved every static callback
+   * to the instance "for consistency" would pass.
+   */
+  public function testRegistersNeoFieldAgainstCallableThatCanReadTheGate(): void {
+    $extension = new TwigExtension(['debug' => TRUE]);
+    $filters = [];
+    foreach ($extension->getFilters() as $filter) {
+      $filters[$filter->getName()] = $filter;
+    }
+
+    $this->assertArrayHasKey(
+      'neo_field',
+      $filters,
+      'The registered name does not move: it is the actual contract.'
+    );
+
+    [$target, $method] = $filters['neo_field']->getCallable();
+
+    $this->assertSame(
+      $extension,
+      $target,
+      'neo_field is registered against the extension instance, which is the only'
+      . ' target that can read the debug gate a notice sits behind.'
+    );
+    $this->assertSame('renderField', $method, 'The method behind the name is unchanged.');
+    $this->assertFalse(
+      (new \ReflectionMethod(TwigExtension::class, 'renderField'))->isStatic(),
+      'A static method cannot reach an instance property, so it is no longer static.'
+    );
+
+    [$children_target, $children_method] = $filters['neo_children']->getCallable();
+
+    $this->assertSame(
+      TwigExtension::class,
+      $children_target,
+      'neo_children stays registered against the class: it has no notice to gate.'
+    );
+    $this->assertTrue(
+      (new \ReflectionMethod(TwigExtension::class, $children_method))->isStatic(),
+      "neo_children's callback stays static, which is what that registration needs."
     );
   }
 
