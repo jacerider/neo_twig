@@ -472,8 +472,13 @@ class TwigExtension extends AbstractExtension {
    * @param int $max_height
    *   The maximum height.
    *
-   * @return array
-   *   A renderable array.
+   * @return array<string|int, mixed>
+   *   A renderable array: a `link` element for a link resource, an `image`
+   *   element for a photo, and an `html_tag` iframe for everything else. The
+   *   empty array is the answer for the two shapes it cannot build one from —
+   *   an absent url, which says so under the **debug gate**, and a resource
+   *   the fetcher could not retrieve, which is logged as an error whatever the
+   *   gate is doing.
    */
   public function getOembed(string $url, int $max_width = 0, int $max_height = 0): array {
     if (empty($url)) {
@@ -565,15 +570,31 @@ class TwigExtension extends AbstractExtension {
   /**
    * Get the URL for a given URI.
    *
-   * @param string|null $uri
-   *   The URI.
-   * @param array $options
-   *   The options.
+   * @param mixed $uri
+   *   The uri to resolve, and one of the few places where anything really is
+   *   accepted. A uri with a scheme resolves on the first pass; a rooted
+   *   path, bare fragment or query string resolves on the second; an absent
+   *   value — NULL, `''` or `'0'`, since the branch is chosen by `empty()` —
+   *   resolves the current route instead. A non-string is not rejected and is
+   *   not read as a **non-linking uri** either: the guard below is
+   *   `is_string()`-gated, so markup or a number printing as `<nolink>` falls
+   *   through to the two resolution passes like any other value.
+   * @param array<string, mixed>|null $options
+   *   Url options keyed by option name — `query`, `fragment`, `attributes`
+   *   and the rest, as `Url::fromUri()` documents them. NULL is accepted in
+   *   place of the array because a template routinely passes a link option
+   *   that does not exist, and it is normalised on the first line, so NULL
+   *   and an empty array are the same call.
    * @param bool $destination
-   *   Whether to add the current page as a destination query parameter.
+   *   Whether to add the current page as a destination query parameter. It
+   *   joins the query the caller already had rather than replacing it, and is
+   *   written above the **non-linking uri** guard, so a uri that links nowhere
+   *   never carries one.
    *
    * @return string
-   *   The URL.
+   *   The url, always a string. Two of the four answers are give-ups and say
+   *   so under the **debug gate**: the empty string for a **non-linking
+   *   uri**, and `/` when both resolution passes threw.
    */
   public function getUrl($uri, ?array $options = [], $destination = FALSE) {
     // Templates commonly pass a value that does not exist, such as
@@ -1602,8 +1623,11 @@ class TwigExtension extends AbstractExtension {
    * @param \Twig\Node\Node $args_node
    *   The arguments of the path/url functions.
    *
-   * @return array
-   *   An array with the contexts the URL is safe
+   * @return array<int, string>
+   *   An array with the contexts the URL is safe — the single-member list
+   *   `['html']` when the argument node lets it promise that, and the empty
+   *   list when it cannot, which leaves Twig to escape the generated url
+   *   itself.
    */
   public function isUrlGenerationSafe(Node $args_node) {
     // Support named arguments.
