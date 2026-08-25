@@ -841,16 +841,16 @@ class TwigExtension extends AbstractExtension {
    * attached to; with the **debug gate** off nothing is attached and the
    * reference is never written through.
    *
-   * @param array $build
+   * @param array<string|int, mixed> $build
    *   The renderable array being written to. Gains the **inline notice** when
    *   the target cannot be reached and Twig debugging is on.
-   * @param string|array $key
+   * @param string|non-empty-array<int, string> $key
    *   The key to write to, or an array whose last entry is the key and whose
    *   earlier entries are a parents path to the element holding it.
    * @param string $name
    *   The calling writer's registered name, as a template author types it.
    *
-   * @return array|null
+   * @return array{array<int, string>, string, array<string|int, mixed>}|null
    *   A tuple of the parents path, the resolved key and the element found at
    *   that path, or NULL when there is nothing to write to.
    */
@@ -882,18 +882,18 @@ class TwigExtension extends AbstractExtension {
    * was just written, so a writer that has an array-shaped payload to mirror
    * hands it over here. A writer with no payload gets no mirror.
    *
-   * @param array $build
+   * @param array<string|int, mixed> $build
    *   The renderable array being written to.
-   * @param array $parents
+   * @param array<int, string> $parents
    *   The parents path the element was found at.
-   * @param array $element
+   * @param array<string|int, mixed> $element
    *   The element, with the writer's write already applied.
-   * @param array|null $mirror
+   * @param array<string, mixed>|null $mirror
    *   Attributes to mirror into a link element's options, keyed by attribute
    *   name, or NULL to mirror nothing. An array value is merged onto whatever
    *   the options already held; anything else replaces it.
    *
-   * @return array
+   * @return array<string|int, mixed>
    *   The renderable array with the element written back into it.
    */
   protected function commitWriteTarget($build, $parents, $element, $mirror = NULL) {
@@ -916,6 +916,23 @@ class TwigExtension extends AbstractExtension {
 
   /**
    * Add classes to a renderable array.
+   *
+   * @param array<string|int, mixed>|\Drupal\Core\Link $build
+   *   The renderable written to: a render array, or a `Link`. Anything else —
+   *   an empty value, a scalar, some other object — is handed straight back
+   *   unchanged and unwritten, and says so under the **debug gate**.
+   * @param string|array<int, string|array<int, string>> $classes
+   *   A single class, a list of classes, or a list containing a list. A member
+   *   that is itself a list is imploded on a space, so a nested list still
+   *   arrives as a flat class list.
+   * @param string|non-empty-array<int, string> $key
+   *   The key to write to, or an array whose last entry is the key and whose
+   *   earlier entries are a parents path to the element holding it.
+   *
+   * @return array<string|int, mixed>|\Drupal\Core\Link
+   *   The value it was handed, with the classes merged in: a render array
+   *   comes back a render array and a `Link` comes back the same `Link`. A
+   *   value it could not write to comes back exactly as it went in.
    */
   public function addClass($build, $classes, $key = 'attributes') {
     if (empty($build)) {
@@ -1038,6 +1055,23 @@ class TwigExtension extends AbstractExtension {
 
   /**
    * Add attributes to a renderable array.
+   *
+   * @param array<string|int, mixed>|\Drupal\Core\Link $build
+   *   The renderable written to: a render array, or a `Link`. Anything else —
+   *   an empty value, a scalar, some other object — is handed straight back
+   *   unchanged and unwritten, and says so under the **debug gate**.
+   * @param \Drupal\Core\Template\Attribute|array<string, mixed> $attributes
+   *   An `Attribute` object, or an array of attributes keyed by name. An array
+   *   is wrapped in an `Attribute` before anything else happens, so both
+   *   shapes behave identically.
+   * @param string|non-empty-array<int, string> $key
+   *   The key to write to, or an array whose last entry is the key and whose
+   *   earlier entries are a parents path to the element holding it.
+   *
+   * @return array<string|int, mixed>|\Drupal\Core\Link
+   *   The value it was handed, with the set merged in: a render array comes
+   *   back a render array and a `Link` comes back the same `Link`. A value it
+   *   could not write to comes back exactly as it went in.
    */
   public function mergeAttributes($build, Attribute|array $attributes, $key = 'attributes') {
     if (empty($build)) {
@@ -1095,6 +1129,23 @@ class TwigExtension extends AbstractExtension {
 
   /**
    * Add attribute to a renderable array.
+   *
+   * @param array<string|int, mixed>|\Drupal\Core\Link $build
+   *   The renderable written to: a render array, or a `Link`. Anything else —
+   *   an empty value, a scalar, some other object — is handed straight back
+   *   unchanged and unwritten, and says so under the **debug gate**.
+   * @param string $attribute
+   *   The attribute name.
+   * @param string $value
+   *   The attribute value.
+   * @param string|non-empty-array<int, string> $key
+   *   The key to write to, or an array whose last entry is the key and whose
+   *   earlier entries are a parents path to the element holding it.
+   *
+   * @return array<string|int, mixed>|\Drupal\Core\Link
+   *   The value it was handed, with the attribute set on it: a render array
+   *   comes back a render array and a `Link` comes back the same `Link`. A
+   *   value it could not write to comes back exactly as it went in.
    */
   public function setAttribute($build, string $attribute, string $value, $key = 'attributes') {
     if (empty($build)) {
