@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\neo_twig\Kernel;
 
+use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\Entity\Entity\EntityViewDisplay;
 use Drupal\Core\Field\FieldStorageDefinitionInterface;
+use Drupal\Core\Logger\RfcLogLevel;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\entity_test\Entity\EntityTest;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\neo_twig\TwigExtension;
 use PHPUnit\Framework\Attributes\Group;
+use Symfony\Component\ErrorHandler\BufferingLogger;
 
 /**
  * Tests the two filters that reach past the render array into real content.
@@ -48,6 +51,20 @@ use PHPUnit\Framework\Attributes\Group;
  * has no criterion here because the plan characterises rather than repairs; it
  * is written up in `docs/improvements/neo_twig.md` instead.
  *
+ * **The three reasons this filter gives up now say which one fired**, and the
+ * three criteria after the characterisation ones are that. They live here,
+ * beside the `NULL`s they resolve, so the two fail together: a notice that
+ * changed what the filter answers breaks a characterisation criterion in the
+ * same run. None of those is edited. The filter's fourth reason — the value it
+ * was handed was never a field's render array — stops before any entity is
+ * touched and is pinned in the unit class with the other three filters behind
+ * the same gate.
+ *
+ * The notice criteria read the **notice log** through the buffering logger
+ * registered below, the same way the `neo_oembed` class reads its one
+ * unconditional error, because the seam logs through `\Drupal::logger()` and
+ * there is no seam to inject through.
+ *
  * @see \Drupal\Tests\neo_twig\Unit\TwigExtensionFieldFiltersTest
  */
 #[Group('neo_twig')]
@@ -65,6 +82,11 @@ final class TwigExtensionEntityFiltersTest extends KernelTestBase {
   ];
 
   /**
+   * The service id of the logger the notices are asserted against.
+   */
+  private const LOGGER_SERVICE = 'neo_twig_test.buffering_logger';
+
+  /**
    * The extension under test.
    */
   private TwigExtension $extension;
@@ -75,6 +97,17 @@ final class TwigExtensionEntityFiltersTest extends KernelTestBase {
    * @var \Drupal\entity_test\Entity\EntityTest[]
    */
   private array $targets = [];
+
+  /**
+   * {@inheritdoc}
+   */
+  public function register(ContainerBuilder $container): void {
+    parent::register($container);
+    // The notice seam logs through `\Drupal::logger()`, so the assertions need
+    // a logger inside the container rather than a database table to read back.
+    $container->register(self::LOGGER_SERVICE, BufferingLogger::class)
+      ->addTag('logger');
+  }
 
   /**
    * {@inheritdoc}
@@ -98,6 +131,19 @@ final class TwigExtensionEntityFiltersTest extends KernelTestBase {
     }
 
     $this->extension = new TwigExtension();
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function tearDown(): void {
+    // Symfony's BufferingLogger prints whatever is still buffered when it is
+    // destroyed, which would dress a failed assertion up as an unrelated
+    // error. Emptying it here keeps a failure reading as the failure it is.
+    if (isset($this->container) && $this->container->has(self::LOGGER_SERVICE)) {
+      $this->cleanLogs();
+    }
+    parent::tearDown();
   }
 
   /**
@@ -404,6 +450,298 @@ final class TwigExtensionEntityFiltersTest extends KernelTestBase {
       'bundle' => 'entity_test',
       'label' => $field_name,
     ])->save();
+  }
+
+  /**
+   * Tests that it answers the same in both gate states, with nothing inline.
+   *
+   * The criterion above drives the same three misses with the **debug gate**
+   * off, which is the state roughly thirty deployed sites run in. This one
+   * repeats every reason `neo_target_entity` gives up with the gate on as
+   * well, because that is the state a notice exists in and the state in which
+   * a diagnostic could accidentally become a behaviour change.
+   *
+   * Nothing about the answer moves. The gate's own failure, a build naming no
+   * field and a build carrying no parent object all still answer `NULL`; a
+   * reference field holding nothing still answers `FALSE`, which is the
+   * `reset([])` finding this class already records rather than a value this
+   * ticket introduced. Two `NULL`s stop reading the same; neither stops being
+   * `NULL`.
+   *
+   * And nothing is attached anywhere. This filter answers an entity, a list of
+   * entities or nothing at all, so there is never a render array to carry an
+   * **inline notice** — the build it was handed comes back out of the call
+   * exactly as it went in, which is what a filter that decorated its argument
+   * would break.
+   */
+  public function testAnswersTheSameFromNeoTargetEntityInBothGateStatesWithNothingInline(): void {
+    $parent = EntityTest::create(['name' => 'Parent']);
+    $parent->save();
+
+    foreach (['off' => FALSE, 'on' => TRUE] as $state => $gate) {
+      $extension = new TwigExtension(['debug' => $gate]);
+
+      foreach ($this->targetEntityMisses($parent) as $label => $build) {
+        $handed = $build;
+        $answer = $extension->getTargetEntity($build);
+
+        $this->assertNull(
+          $answer,
+          'With the gate ' . $state . ', neo_target_entity answers NULL for ' . $label . '.'
+        );
+        $this->assertSame(
+          $handed,
+          $build,
+          'With the gate ' . $state . ', ' . $label . ' comes back exactly as it was handed over.'
+        );
+      }
+
+      $empty = [
+        '#theme' => 'field',
+        '#field_name' => 'field_single_ref',
+        '#object' => $parent,
+      ];
+      $handed = $empty;
+
+      $this->assertFalse(
+        $extension->getTargetEntity($empty),
+        'With the gate ' . $state . ', an empty reference field still answers FALSE.'
+      );
+      $this->assertSame(
+        $handed,
+        $empty,
+        'With the gate ' . $state . ', that build comes back exactly as it was handed over.'
+      );
+    }
+  }
+
+  /**
+   * Tests that it notices a missing field name and a missing parent object.
+   *
+   * Past the **field-shape gate** there are two ways to get nothing that have
+   * nothing to do with each other. A build with no `#field_name` never named a
+   * field, so the filter had nothing to ask for; a build whose parent object
+   * sits under neither `#object` nor `#field_collection_item` named one but
+   * had nothing to ask. The first is usually a build that was never a field's;
+   * the second is a field render array that some preprocess rebuilt and
+   * stripped.
+   *
+   * Two different mistakes, two different fixes, so two different
+   * expectations — asserted against each other and against the gate's own,
+   * because until now all three were the same `NULL`. Every line names
+   * `neo_target_entity` and none of them names `getTargetEntity`, the PHP
+   * method behind it, which is not something a template author has ever seen.
+   *
+   * A parent under some third key is driven as well: it is the missing-parent
+   * reason arrived at from the other direction, and it says the same thing,
+   * because the filter genuinely cannot tell the two apart.
+   */
+  public function testNoticesMissingFieldNameAndMissingParentObjectFromNeoTargetEntity(): void {
+    $parent = EntityTest::create(['name' => 'Parent']);
+    $parent->save();
+
+    $said = [];
+    foreach ($this->targetEntityMisses($parent) as $label => $build) {
+      $this->cleanLogs();
+      $extension = new TwigExtension(['debug' => TRUE]);
+
+      $this->assertNull($extension->getTargetEntity($build), $label . ' still answers NULL.');
+
+      $lines = $this->noticeLines();
+
+      $this->assertCount(1, $lines, 'neo_target_entity says something about ' . $label . '.');
+      $this->assertStringContainsString(
+        'neo_target_entity',
+        $lines[0],
+        'The line for ' . $label . ' names neo_target_entity.'
+      );
+      $this->assertStringNotContainsString(
+        'getTargetEntity',
+        $lines[0],
+        'The line for ' . $label . ' never names the PHP method behind it.'
+      );
+      $said[$label] = $this->expectationIn($lines[0]);
+    }
+
+    $distinct = [
+      'the gate itself' => $said['a value that is not a field render array at all'],
+      'a field name that is not there' => $said['a field render array naming no field'],
+      'a parent object that is not there' => $said['a field render array carrying no parent object'],
+    ];
+
+    $this->assertSame(
+      $distinct,
+      array_unique($distinct),
+      'The gate, a missing field name and a missing parent object expect three different things.'
+    );
+    $this->assertSame(
+      $said['a field render array carrying no parent object'],
+      $said['a field render array whose parent is under a third key'],
+      'A parent under a third key is the missing-parent reason, arrived at from the other side.'
+    );
+  }
+
+  /**
+   * Tests that it notices a reference that resolved to no entity.
+   *
+   * The last of the four reasons, and the only one where everything the filter
+   * asked for was there: the build was a field's, it named a field, the parent
+   * object was under a key the filter reads, and the field it asked for simply
+   * points at nothing. A template author looking at a populated node and an
+   * empty region has no way to tell that from any of the three misses above.
+   *
+   * Driven two ways, because they are the same answer from different causes: a
+   * reference field an editor left empty, and a field that is not a reference
+   * field at all, whose items carry no entity to resolve. Both say the same
+   * thing, because from inside the filter they are the same thing — the field
+   * was read and no entity came back.
+   *
+   * The answer does not move. It is still `FALSE`, the `reset([])` this class
+   * already records, and the notice is log-only: there is no render array to
+   * attach anything to.
+   */
+  public function testNoticesReferenceThatResolvedToNoEntityFromNeoTargetEntity(): void {
+    $parent = EntityTest::create([
+      'name' => 'Parent',
+      'field_text' => 'Not a reference at all',
+    ]);
+    $parent->save();
+
+    $resolved_to_nothing = [
+      'a reference field holding nothing' => 'field_single_ref',
+      'a field that is not a reference field' => 'field_text',
+    ];
+
+    $said = [];
+    foreach ($resolved_to_nothing as $label => $field_name) {
+      $this->cleanLogs();
+      $extension = new TwigExtension(['debug' => TRUE]);
+
+      $this->assertFalse(
+        $extension->getTargetEntity([
+          '#theme' => 'field',
+          '#field_name' => $field_name,
+          '#object' => $parent,
+        ]),
+        $label . ' still answers FALSE, exactly as it did.'
+      );
+
+      $lines = $this->noticeLines();
+
+      $this->assertCount(1, $lines, 'neo_target_entity says something about ' . $label . '.');
+      $this->assertStringContainsString(
+        'neo_target_entity',
+        $lines[0],
+        'The line for ' . $label . ' names neo_target_entity.'
+      );
+      $this->assertStringNotContainsString(
+        'getTargetEntity',
+        $lines[0],
+        'The line for ' . $label . ' never names the PHP method behind it.'
+      );
+      $said[$label] = $this->expectationIn($lines[0]);
+    }
+
+    $this->assertCount(
+      1,
+      array_unique($said),
+      'A field read that yields no entity is one reason, however it came about.'
+    );
+
+    // And it is not one of the three reasons that stop before the field is
+    // read: everything this one asked for was there.
+    $this->cleanLogs();
+    $extension = new TwigExtension(['debug' => TRUE]);
+    $extension->getTargetEntity(['#theme' => 'field', '#object' => $parent]);
+    $extension->getTargetEntity(['#theme' => 'field', '#field_name' => 'field_single_ref']);
+    $extension->getTargetEntity('not a field at all');
+
+    $earlier = array_map(fn (string $line): string => $this->expectationIn($line), $this->noticeLines());
+
+    $this->assertNotContains(
+      reset($said),
+      $earlier,
+      'A reference that resolved to nothing is its own answer, not one of the three before it.'
+    );
+  }
+
+  /**
+   * Every way neo_target_entity gives up before it reads a field.
+   *
+   * @param \Drupal\entity_test\Entity\EntityTest $parent
+   *   A saved parent entity for the builds that carry one.
+   *
+   * @return array<string, mixed>
+   *   Values to hand the filter, keyed by how a failure message names them.
+   */
+  private function targetEntityMisses(EntityTest $parent): array {
+    return [
+      'a value that is not a field render array at all' => ['#theme' => 'item_list'],
+      'a field render array naming no field' => [
+        '#theme' => 'field',
+        '#object' => $parent,
+      ],
+      'a field render array carrying no parent object' => [
+        '#theme' => 'field',
+        '#field_name' => 'field_single_ref',
+      ],
+      'a field render array whose parent is under a third key' => [
+        '#theme' => 'field',
+        '#field_name' => 'field_single_ref',
+        '#entity' => $parent,
+      ],
+    ];
+  }
+
+  /**
+   * The notices on the module's own channel, as a reader would see them.
+   *
+   * @return string[]
+   *   One line per notice, in the order written.
+   */
+  private function noticeLines(): array {
+    $lines = [];
+    foreach ($this->cleanLogs() as [$level, $message, $context]) {
+      if (($context['channel'] ?? '') !== 'neo_twig') {
+        continue;
+      }
+      $this->assertSame(RfcLogLevel::DEBUG, $level, 'A notice is logged at debug level.');
+      $lines[] = strtr((string) $message, array_map(
+        static fn ($replacement): string => (string) $replacement,
+        array_filter($context, static fn ($key): bool => str_starts_with($key, '@'), ARRAY_FILTER_USE_KEY)
+      ));
+    }
+    return $lines;
+  }
+
+  /**
+   * The "expected …" half of a notice line, without the value it describes.
+   *
+   * Criteria about two reasons reading differently compare this rather than
+   * the whole line, because the description of what arrived differs between
+   * two reasons anyway — so comparing whole lines would pass even where both
+   * reasons said they expected the same thing.
+   *
+   * @param string $line
+   *   A notice line as a reader would see it.
+   *
+   * @return string
+   *   What the notice said it expected.
+   */
+  private function expectationIn(string $line): string {
+    $found = preg_match('/expected (.*), received /', $line, $matches);
+    $this->assertSame(1, $found, 'The notice says what it expected: ' . $line);
+    return $matches[1];
+  }
+
+  /**
+   * Returns and discards everything logged since the last call.
+   *
+   * @return array
+   *   The buffered log records, each `[level, message, context]`.
+   */
+  private function cleanLogs(): array {
+    return $this->container->get(self::LOGGER_SERVICE)->cleanLogs();
   }
 
 }

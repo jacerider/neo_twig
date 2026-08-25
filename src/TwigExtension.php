@@ -675,6 +675,68 @@ class TwigExtension extends AbstractExtension {
   private const WALKER_EXPECTS_CHILDREN = 'a render array with children';
 
   /**
+   * What the four filters behind the field-shape gate expect to be handed.
+   *
+   * One reason from four filters, so one phrase: the gate is a single check on
+   * `#theme`, and the only thing that separates the four notices it produces
+   * is the **registered name** of the filter that tripped it. Everything past
+   * the gate says something of its own, because that is where two `NULL`s
+   * stopped reading the same.
+   */
+  private const FIELD_EXPECTS = "a field's render array";
+
+  /**
+   * What neo_value expects a field render array to hold.
+   *
+   * Distinct from the gate on purpose. The gate answers "that is not a field";
+   * this answers "that is a field, and it has nothing in it" — two different
+   * mistakes with two different fixes, which the same `NULL` has been hiding.
+   */
+  private const FIELD_EXPECTS_ITEMS = 'a field render array with at least one item';
+
+  /**
+   * What neo_raw expects to find under #items.
+   *
+   * A build with no `#items`, or an `#items` that is not typed data, is one
+   * the filter cannot read at all — usually an array themed as a field by
+   * something other than the field formatter. The fix is a different build.
+   */
+  private const FIELD_EXPECTS_TYPED_DATA = 'field items that are typed data';
+
+  /**
+   * What neo_raw expects those items to hold.
+   *
+   * The ordinary unfilled field, and a different answer from the one above:
+   * the items were readable and there was nothing in them. The fix is to fill
+   * the field in, or to guard the template.
+   */
+  private const FIELD_EXPECTS_VALUES = 'field items with at least one value';
+
+  /**
+   * What neo_target_entity expects the render array to name.
+   */
+  private const FIELD_EXPECTS_NAME = 'a render array naming the field it came from';
+
+  /**
+   * What neo_target_entity expects the render array to carry.
+   *
+   * The parent object is read from `#object` or `#field_collection_item` and
+   * from nowhere else, so a build that carries one under some third key is
+   * this reason too — the filter genuinely cannot tell the two apart.
+   */
+  private const FIELD_EXPECTS_PARENT = "a render array carrying the field's parent object";
+
+  /**
+   * What neo_target_entity expects the field it read to point at.
+   *
+   * The only one of the four where everything asked for was there: the build
+   * was a field's, it named a field, the parent object was under a key the
+   * filter reads, and the field points at nothing. From inside a template that
+   * is indistinguishable from the three misses before it.
+   */
+  private const FIELD_EXPECTS_REFERENCE = 'a reference field pointing at an entity';
+
+  /**
    * Resolve the write target for an attribute writer.
    *
    * Splits a parents path out of the key argument, applies the hash-prefix
@@ -1024,6 +1086,7 @@ class TwigExtension extends AbstractExtension {
    */
   public function getFieldLabel($build) {
     if (!$this->isFieldRenderArray($build)) {
+      $this->notice('neo_label', self::FIELD_EXPECTS, $build);
       return NULL;
     }
     if (isset($build['#items'])) {
@@ -1057,11 +1120,13 @@ class TwigExtension extends AbstractExtension {
   public function getFieldValue($build) {
 
     if (!$this->isFieldRenderArray($build)) {
+      $this->notice('neo_value', self::FIELD_EXPECTS, $build);
       return NULL;
     }
 
     $elements = Element::children($build);
     if (empty($elements)) {
+      $this->notice('neo_value', self::FIELD_EXPECTS_ITEMS, $build);
       return NULL;
     }
 
@@ -1088,14 +1153,20 @@ class TwigExtension extends AbstractExtension {
   public function getRawValues($build, $key = '') {
 
     if (!$this->isFieldRenderArray($build)) {
+      $this->notice('neo_raw', self::FIELD_EXPECTS, $build);
       return NULL;
     }
     if (!isset($build['#items']) || !($build['#items'] instanceof TypedDataInterface)) {
+      // What was found at that key, rather than the build it sat in: an
+      // absent `#items` and one holding a plain array are the two mistakes an
+      // author is telling apart here.
+      $this->notice('neo_raw', self::FIELD_EXPECTS_TYPED_DATA, $build['#items'] ?? NULL);
       return NULL;
     }
 
     $item_values = $build['#items']->getValue();
     if (empty($item_values)) {
+      $this->notice('neo_raw', self::FIELD_EXPECTS_VALUES, $item_values);
       return NULL;
     }
 
@@ -1127,14 +1198,17 @@ class TwigExtension extends AbstractExtension {
   public function getTargetEntity($build) {
 
     if (!$this->isFieldRenderArray($build)) {
+      $this->notice('neo_target_entity', self::FIELD_EXPECTS, $build);
       return NULL;
     }
     if (!isset($build['#field_name'])) {
+      $this->notice('neo_target_entity', self::FIELD_EXPECTS_NAME, $build);
       return NULL;
     }
 
     $parent_key = $this->getParentObjectKey($build);
     if (empty($parent_key)) {
+      $this->notice('neo_target_entity', self::FIELD_EXPECTS_PARENT, $build);
       return NULL;
     }
 
@@ -1142,12 +1216,23 @@ class TwigExtension extends AbstractExtension {
     /** @var \Drupal\Core\Entity\ContentEntityInterface $parent */
     $parent = $build[$parent_key];
 
+    // Resolved into a variable rather than read in the loop header so that the
+    // list itself can be described when nothing comes back: which field was
+    // read is the part of that answer the build cannot supply.
+    $items = $parent->get($build['#field_name']);
+
     $entities = [];
     /** @var \Drupal\Core\Field\FieldItemInterface $field */
-    foreach ($parent->get($build['#field_name']) as $item) {
+    foreach ($items as $item) {
       if (isset($item->entity)) {
         $entities[] = $item->entity;
       }
+    }
+
+    if (!$entities) {
+      // Noticed rather than returned, because `reset([])` answers FALSE here
+      // and this ticket explains an answer without moving it.
+      $this->notice('neo_target_entity', self::FIELD_EXPECTS_REFERENCE, $items);
     }
 
     return count($entities) > 1 ? $entities : reset($entities);
