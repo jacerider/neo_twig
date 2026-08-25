@@ -55,8 +55,12 @@ class TwigExtension extends AbstractExtension {
   /**
    * Constructs a TwigExtension object.
    *
-   * @param array $twig_config
-   *   The Twig configuration from the container.
+   * @param array<string, mixed> $twig_config
+   *   The Twig configuration the container hands over. One key is read from
+   *   it — `debug`, the **debug gate** that `inspect()` and every notice in
+   *   this class are gated on. A bare configuration array with no `debug` key
+   *   is a valid thing to construct this class with and leaves the gate off,
+   *   which is what every unit test in the module does.
    */
   public function __construct(array $twig_config = []) {
     $this->debug = !empty($twig_config['debug']);
@@ -193,7 +197,7 @@ class TwigExtension extends AbstractExtension {
    * would have applied to it, so marking the pair safe does not smuggle
    * anything past a check it would otherwise have faced.
    *
-   * @param array $build
+   * @param array<string|int, mixed> $build
    *   The element the helper is about to hand back.
    * @param string $message
    *   The notice, as plain text.
@@ -213,6 +217,10 @@ class TwigExtension extends AbstractExtension {
 
   /**
    * {@inheritdoc}
+   *
+   * @return array<int, \Twig\TwigFunction>
+   *   The three **registered names** this module adds as Twig functions,
+   *   each bound to the method behind it.
    */
   public function getFunctions(): array {
     return [
@@ -241,8 +249,9 @@ class TwigExtension extends AbstractExtension {
    * quickest answer to "what can I print in this template?". Called with one
    * it walks that value's printable children instead.
    *
-   * @param array $context
-   *   The Twig context, supplied by Twig itself.
+   * @param array<string, mixed> $context
+   *   The Twig context, supplied by Twig itself and keyed by the name a
+   *   template prints the variable under.
    * @param mixed $var
    *   The variable to inspect, normally a render array. Omit to list the whole
    *   context.
@@ -297,8 +306,11 @@ class TwigExtension extends AbstractExtension {
   /**
    * Lists every variable in scope in the current template.
    *
-   * @param array $context
-   *   The Twig context.
+   * @param array<string, mixed> $context
+   *   The Twig context, keyed by the name a template prints the variable
+   *   under. Twig's own internals and this module's plumbing arrive under
+   *   the same keys as everything else and are skipped by their leading
+   *   underscore.
    *
    * @return string
    *   An HTML table.
@@ -397,15 +409,19 @@ class TwigExtension extends AbstractExtension {
   /**
    * Collects the printable children of a render array.
    *
-   * @param array $element
+   * @param array<string|int, mixed> $element
    *   The render array.
    * @param int $depth
    *   How many levels to walk.
    * @param int $level
    *   The current level.
    *
-   * @return array
-   *   Rows with `level`, `key`, `type` and `title`.
+   * @return array<int, array{level: int, key: string, type: string, title: string}>
+   *   One row per printable child, in the order the walk reached them, each
+   *   carrying four keys: `level`, the depth it was found at; `key`, the
+   *   child's own key; `type`, the short description of what it is; and
+   *   `title`, its `#title` where it has one and the empty string where it
+   *   does not.
    */
   private function inspectRows(array $element, int $depth, int $level = 0): array {
     $rows = [];
@@ -444,6 +460,10 @@ class TwigExtension extends AbstractExtension {
 
   /**
    * {@inheritdoc}
+   *
+   * @return array<int, \Twig\TwigFilter>
+   *   The twelve **registered names** this module adds as Twig filters, each
+   *   bound to the method behind it.
    */
   public function getFilters() {
     return [
