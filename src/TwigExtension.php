@@ -1271,8 +1271,11 @@ class TwigExtension extends AbstractExtension {
   /**
    * Twig filter callback: Only return a field's label.
    *
-   * @param array|null $build
-   *   Render array of a field.
+   * @param array<string|int, mixed>|null $build
+   *   The value read: a field's render array, which the **field-shape gate**
+   *   recognises by its `#theme` and nothing else. Anything outside that
+   *   shape — an empty value, a scalar, an array themed as something else —
+   *   answers NULL and says so under the **debug gate**.
    *
    * @return string|null
    *   The label of a field. NULL is returned if $build is not a render array
@@ -1304,10 +1307,13 @@ class TwigExtension extends AbstractExtension {
   /**
    * Twig filter callback: Only return a field's value(s).
    *
-   * @param array|null $build
-   *   Render array of a field.
+   * @param array<string|int, mixed>|null $build
+   *   The value read: a field's render array, which the **field-shape gate**
+   *   recognises by its `#theme` and nothing else. Anything outside that
+   *   shape — an empty value, a scalar, an array themed as something else —
+   *   answers NULL and says so under the **debug gate**.
    *
-   * @return array|null
+   * @return array<string|int, mixed>|null
    *   Array of render array(s) of field value(s). NULL is returned if $build
    *   is not the render array of a field, and if it holds no field items.
    */
@@ -1335,14 +1341,25 @@ class TwigExtension extends AbstractExtension {
   /**
    * Twig filter callback: Return specific field item(s) value.
    *
-   * @param array|null $build
-   *   Render array of a field.
+   * @param array<string|int, mixed>|null $build
+   *   The value read: a field's render array, which the **field-shape gate**
+   *   recognises by its `#theme` and nothing else. Anything outside that
+   *   shape — an empty value, a scalar, an array themed as something else —
+   *   answers NULL and says so under the **debug gate**.
    * @param string $key
-   *   The name of the field value to retrieve.
+   *   The name of the field value to retrieve: a **field property** — the name
+   *   an item stores a value under, such as `value`, `format`, `uri` or
+   *   `target_id` — and not the key the attribute writers take, which names
+   *   where a write lands. Named, every item narrows to that one property, and
+   *   an item that does not carry it is NULL at its delta rather than a gap.
+   *   The key is tested for truthiness, so `''` and `'0'` are read as no key
+   *   at all and every stored property of every item comes back.
    *
-   * @return array|null
+   * @return array<int, mixed>|mixed|null
    *   Single field value or array of field values. If the field value is not
-   *   found, null is returned.
+   *   found, null is returned. Two or more items answer a list keyed by delta;
+   *   one item collapses to the value itself rather than to a one-item list,
+   *   so the shape follows how many items were saved.
    */
   public function getRawValues($build, $key = '') {
 
@@ -1382,8 +1399,11 @@ class TwigExtension extends AbstractExtension {
    *
    * Suitable for entity_reference fields: Image, File, Taxonomy, etc.
    *
-   * @param array|null $build
-   *   Render array of a field.
+   * @param array<string|int, mixed>|null $build
+   *   The value read: a field's render array, which the **field-shape gate**
+   *   recognises by its `#theme` and nothing else. Anything outside that
+   *   shape — an empty value, a scalar, an array themed as something else —
+   *   answers NULL and says so under the **debug gate**.
    *
    * @return \Drupal\Core\Entity\ContentEntityInterface|\Drupal\Core\Entity\ContentEntityInterface[]|null
    *   A single target entity or an array of target entities. If no target
@@ -1416,7 +1436,7 @@ class TwigExtension extends AbstractExtension {
     $items = $parent->get($build['#field_name']);
 
     $entities = [];
-    /** @var \Drupal\Core\Field\FieldItemInterface $field */
+    /** @var \Drupal\Core\Field\FieldItemInterface $item */
     foreach ($items as $item) {
       if (isset($item->entity)) {
         $entities[] = $item->entity;
@@ -1435,7 +1455,7 @@ class TwigExtension extends AbstractExtension {
   /**
    * Checks whether the render array is a field's render array.
    *
-   * @param array|null $build
+   * @param array<string|int, mixed>|null $build
    *   The render array.
    *
    * @return bool
@@ -1451,7 +1471,7 @@ class TwigExtension extends AbstractExtension {
    *
    * Different field types use different key names.
    *
-   * @param array $build
+   * @param array<string|int, mixed> $build
    *   Render array.
    *
    * @return string
@@ -1511,7 +1531,7 @@ class TwigExtension extends AbstractExtension {
    * @param string $field_id
    *   The field id to render.
    *
-   * @return array|null
+   * @return array<string|int, mixed>|null
    *   The render array of the named field, or NULL for any of the four misses
    *   above.
    */
