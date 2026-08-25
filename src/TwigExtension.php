@@ -966,12 +966,12 @@ class TwigExtension extends AbstractExtension {
    * Add classes to the children of a renderable.
    *
    * Example:
-   * {{ build|add_child_class('my-class') }}
-   * {{ build|add_child_class('my-class', 'wrapper_attributes') }}
+   * {{ build|neo_child_class('my-class') }}
+   * {{ build|neo_child_class('my-class', 'wrapper_attributes') }}
    *
    * This will add the class to any child element that has a property with the
    * provided key and value. For example ['#field_name' => 'title'].
-   * {{ build|add_child_class('my-class', 'wrapper_attributes',
+   * {{ build|neo_child_class('my-class', 'wrapper_attributes',
    * 'field_name', 'title') }}
    */
   public function addChildClass($build, $classes, $key = 'attributes', $prop = NULL, $propValue = NULL) {
@@ -1006,7 +1006,7 @@ class TwigExtension extends AbstractExtension {
   }
 
   /**
-   * Add classes to the children of a renderable.
+   * Adds classes to the items under a named property (`neo_property_class`).
    */
   public function addPropertyClass($build, $classes, $property = 'items', $key = 'attributes') {
     if (empty($build)) {
@@ -1135,7 +1135,7 @@ class TwigExtension extends AbstractExtension {
   }
 
   /**
-   * Add classes to the children of a renderable.
+   * Sets an attribute on every child of a renderable (`neo_child_attribute`).
    */
   public function setChildAttribute($build, string $attribute, string $value, $key = 'attributes') {
     if (empty($build)) {
@@ -1157,9 +1157,9 @@ class TwigExtension extends AbstractExtension {
    * @param array|null $build
    *   Render array of a field.
    *
-   * @return string
-   *   The label of a field. If $build is not a render array of a field, NULL is
-   *   returned.
+   * @return string|null
+   *   The label of a field. NULL is returned if $build is not a render array
+   *   of a field, and if the field carries no label to answer with.
    */
   public function getFieldLabel($build) {
     if (!$this->isFieldRenderArray($build)) {
@@ -1190,9 +1190,9 @@ class TwigExtension extends AbstractExtension {
    * @param array|null $build
    *   Render array of a field.
    *
-   * @return array
-   *   Array of render array(s) of field value(s). If $build is not the render
-   *   array of a field, NULL is returned.
+   * @return array|null
+   *   Array of render array(s) of field value(s). NULL is returned if $build
+   *   is not the render array of a field, and if it holds no field items.
    */
   public function getFieldValue($build) {
 
@@ -1387,13 +1387,16 @@ class TwigExtension extends AbstractExtension {
    * moved is a PHP method nothing outside this module calls. `neo_children`
    * next door stays static, because it makes no notice and needs no gate.
    *
-   * @param array $build
-   *   The render array whose children are to be filtered.
+   * @param mixed $build
+   *   The render array an entity was rendered into. Anything else is one of
+   *   the misses above rather than an error, which is why it is not declared
+   *   an array.
    * @param string $field_id
    *   The field id to render.
    *
-   * @return array
-   *   The element's children.
+   * @return array|null
+   *   The render array of the named field, or NULL for any of the four misses
+   *   above.
    */
   public function renderField($build, string $field_id): array|null {
     if (!is_array($build) || empty($build['#view_mode'])) {
