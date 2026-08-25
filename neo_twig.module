@@ -12,6 +12,11 @@ use Drupal\Core\Url;
 
 /**
  * Implements hook_theme_registry_alter().
+ *
+ * @phpstan-param array<string, mixed> $theme_registry
+ *   The theme registry being altered, keyed by theme hook name.
+ *
+ * @phpstan-return void
  */
 function neo_twig_theme_registry_alter(&$theme_registry) {
   // Add variables to the "image_formatter" template.
@@ -34,6 +39,12 @@ function neo_twig_theme_registry_alter(&$theme_registry) {
 
 /**
  * Implements hook_preprocess_HOOK() for image_formatter.
+ *
+ * @phpstan-param array<string, mixed> $variables
+ *   The template's variables, keyed by variable name. The two the registry
+ *   alter added are read from here and are absent unless a caller set them.
+ *
+ * @phpstan-return void
  */
 function neo_twig_preprocess_image_formatter(&$variables) {
   if (isset($variables['image_attributes']) && isset($variables['image'])) {
@@ -53,6 +64,13 @@ function neo_twig_preprocess_image_formatter(&$variables) {
  *
  * This is mostly copied from template_preprocess_file_link() in order to
  * regenerate the link with attributes added.
+ *
+ * @phpstan-param array<string, mixed> $variables
+ *   The template's variables, keyed by variable name. The link attribute
+ *   variable the registry alter added is read from here and is absent unless a
+ *   caller set it.
+ *
+ * @phpstan-return void
  */
 function neo_twig_preprocess_file_link(&$variables) {
   $file = $variables['file'];
@@ -81,7 +99,7 @@ function neo_twig_preprocess_file_link(&$variables) {
   }
 
   // Add any link attributes to the options for the link.
-  if (isset($variables['link_attributes']) && isset($options['attributes'])) {
+  if (isset($variables['link_attributes'])) {
     $options['attributes'] = NestedArray::mergeDeepArray([
       $options['attributes'],
       $variables['link_attributes'],
@@ -103,6 +121,12 @@ function neo_twig_preprocess_file_link(&$variables) {
  *   {{ responsive_image }}
  * </a>
  * @endcode
+ *
+ * @phpstan-param array<string, mixed> $variables
+ *   The template's variables, keyed by variable name. The two the registry
+ *   alter added are read from here and are absent unless a caller set them.
+ *
+ * @phpstan-return void
  */
 function neo_twig_preprocess_responsive_image_formatter(&$variables) {
   if (isset($variables['link_attributes'])) {
