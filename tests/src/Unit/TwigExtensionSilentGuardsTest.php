@@ -376,7 +376,7 @@ final class TwigExtensionSilentGuardsTest extends UnitTestCase {
    * It returns every value unchanged from all three writers in both states.
    *
    * The three criteria above pin the same pass-throughs with the **debug
-   * gate** off, which is what roughly thirty deployed sites run. This one
+   * gate** off, which is what every deployed site runs. This one
    * repeats every guard path the three writers carry with the gate **on** as
    * well, because that is the state a notice exists in and the state in which
    * a diagnostic could accidentally become a behaviour change.

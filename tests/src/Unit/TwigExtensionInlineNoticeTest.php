@@ -81,7 +81,7 @@ final class TwigExtensionInlineNoticeTest extends UnitTestCase {
   /**
    * It attaches nothing to the element when twig debugging is off.
    *
-   * This is the half that thirty deployed sites run, and the criterion is
+   * This is the half that every deployed site runs, and the criterion is
    * byte-identical output: the element handed over comes back as the same
    * array, with the same keys in the same order and nothing added to it, so
    * the renderer emits exactly what it emitted before this plan existed.

@@ -277,7 +277,7 @@ final class TwigExtensionUriTest extends KernelTestBase {
    * Tests that it answers the same url from every path, in both gate states.
    *
    * The criteria above drive these paths with the **debug gate** off, which is
-   * the state roughly thirty deployed sites run in. This one repeats all of
+   * the state every deployed site runs in. This one repeats all of
    * them with the gate on as well, because that is the state a notice exists
    * in and the state in which a diagnostic could accidentally become a
    * behaviour change.

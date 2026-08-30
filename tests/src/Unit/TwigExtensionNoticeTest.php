@@ -36,7 +36,7 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * 1. **The gate comes first.** Before a value is described, a message is
  *    formatted or a logger is resolved, `twig.config.debug` is read. That is
  *    what makes it acceptable to call this from the module's hottest surface
- *    on roughly thirty deployed sites, where the gate is off and the only cost
+ *    on every deployed site, where the gate is off and the only cost
  *    is one boolean. "Describes nothing" is asserted rather than assumed: the
  *    value handed over counts the times it is asked to stringify itself, so a
  *    seam that describes first and gates second fails here.
@@ -101,7 +101,7 @@ final class TwigExtensionNoticeTest extends UnitTestCase {
    *
    * The second is the load-bearing half. Describing a value walks it, reads
    * its class and stringifies it, and doing that on every early return across
-   * a page's worth of helper calls is exactly the cost thirty deployed sites
+   * a page's worth of helper calls is exactly the cost deployed sites
    * must not pay. The value handed over here counts every stringification, so
    * a seam that describes before it reads the gate fails on a count, not on a
    * message.
@@ -406,7 +406,7 @@ final class TwigExtensionNoticeTest extends UnitTestCase {
    *
    * The logger is resolved lazily from the container, the way `neo_oembed`
    * already resolves its services, which is what keeps the service definition
-   * — and therefore a container rebuild across thirty sites — out of this
+   * — and therefore a container rebuild across every site — out of this
    * plan. The cost of that choice is that resolution can fail, and a
    * diagnostic that takes a template down is worse than the silence it
    * replaces.

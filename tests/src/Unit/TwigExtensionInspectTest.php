@@ -20,7 +20,7 @@ use PHPUnit\Framework\Attributes\Group;
  * SUGGESTIONS comments. The **debug gate** is the load-bearing criterion here:
  * with debugging off the function returns an empty string and does nothing
  * else, which is what makes a call committed by accident inert on every
- * deployed environment across roughly thirty sites. A backlog candidate wants
+ * deployed environment across every installing site. A backlog candidate wants
  * to reuse that gate for every helper, so it is covered first and hardest —
  * every calling shape, and every way the gate can be off, including a
  * constructor given no configuration at all.

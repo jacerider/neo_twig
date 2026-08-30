@@ -469,7 +469,7 @@ final class TwigExtensionEntityFiltersTest extends KernelTestBase {
    * Tests that it answers the same in both gate states, with nothing inline.
    *
    * The criterion above drives the same three misses with the **debug gate**
-   * off, which is the state roughly thirty deployed sites run in. This one
+   * off, which is the state every deployed site runs in. This one
    * repeats every reason `neo_target_entity` gives up with the gate on as
    * well, because that is the state a notice exists in and the state in which
    * a diagnostic could accidentally become a behaviour change.
@@ -710,7 +710,7 @@ final class TwigExtensionEntityFiltersTest extends KernelTestBase {
    * Tests that neo_field answers NULL for every reason, in both gate states.
    *
    * The characterisation criterion above drives the same misses with the
-   * **debug gate** off, which is the state roughly thirty deployed sites run
+   * **debug gate** off, which is the state every deployed site runs
    * in. This one repeats every reason `neo_field` gives up with the gate on as
    * well, because that is the state a notice exists in and the state in which
    * a diagnostic could accidentally become a behaviour change.

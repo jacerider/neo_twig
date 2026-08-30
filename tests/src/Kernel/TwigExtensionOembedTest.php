@@ -314,7 +314,7 @@ final class TwigExtensionOembedTest extends KernelTestBase {
    * Tests that it answers an empty array for an absent url, in both states.
    *
    * The criterion above drives this path with the **debug gate** off, which is
-   * the state roughly thirty deployed sites run in. This one repeats it with
+   * the state every deployed site runs in. This one repeats it with
    * the gate on as well, because that is the state a notice exists in and the
    * state in which a diagnostic could accidentally become a behaviour change.
    *

@@ -819,7 +819,7 @@ final class TwigExtensionFieldFiltersTest extends UnitTestCase {
    * It answers NULL from all four filters for every reason, in both states.
    *
    * The characterisation criterion above drives the same paths with the gate
-   * off, which is the state roughly thirty deployed sites run in. This one
+   * off, which is the state every deployed site runs in. This one
    * repeats every reason a filter behind the gate answers `NULL` with the
    * **debug gate** on as well, because that is the state a notice exists in
    * and the state in which a diagnostic could accidentally become a behaviour
